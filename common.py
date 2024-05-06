@@ -7,10 +7,11 @@ from dotenv import dotenv_values
 import os
 
 config = {
-    "user_email": os.getenv("user_email"),
-    "app_password": os.getenv("app_password"),
-    "DIRECTORY": os.getenv("DIRECTORY", "rss_feed"),
-    "PORT": os.getenv("PORT", 8000),
+    "imap_server": os.getenv("imap_server"),
+    "userid": os.getenv("userid"),
+    "userpw": os.getenv("userpw"),
+    "mailbox": os.getenv("mailbox", "INBOX"),
+    "PORT": os.getenv("PORT", "8000"),
 }
 # dotenv_values(".env")
 

@@ -62,7 +62,7 @@ def extract_domain_address(email_address: str, default=None) -> str:
     return domain
 
 
-def connect_to_gmail(username, password):
+def connect_to_gmail(imap_server, username, password, mailbox="INBOX"):
     """
     Connects to Gmail using the provided username and password.
 
@@ -78,10 +78,10 @@ def connect_to_gmail(username, password):
 
     """
     try:
-        mail = imaplib.IMAP4_SSL("imap.gmail.com")
+        mail = imaplib.IMAP4_SSL(imap_server)
         mail.login(username, password)
-        mail.select("Meco_911265aa-0cec-454a-a50d-7361719203d6")
-        logging.info("Connected to Gmail and selected newsletters.")
+        mail.select(mailbox)
+        logging.info(f"Connected to Email and selected {mailbox}.")
         return mail
     except Exception as e:
         logging.error(f"Failed to connect to Gmail: {e}")
@@ -250,8 +250,10 @@ def main():
     Returns:
         None
     """
-    user_email = config.get("user_email")
-    app_password = config.get("app_password")
+    imap_server = config.get("imap_server")
+    userid = config.get("userid")
+    userpw = config.get("userpw")
+    mailbox = config.get("mailbox")
 
     # if emails.db does not exist since should be 30, otherwise 1
     # 30 to populate the rss feed for the first time
@@ -260,7 +262,7 @@ def main():
         since = 30
 
     try:
-        service = connect_to_gmail(user_email, app_password)
+        service = connect_to_gmail(imap_server, userid, userpw, mailbox)
         _ = fetch_emails(service, since=since)
 
         DIRECTORY = config.get("directory", "rss_feed")
