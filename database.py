@@ -125,3 +125,18 @@ def get_entry_count():
 
     with Session.begin() as session:
         return session.query(Email).count()
+
+
+def get_last_email_id():
+    """
+    Get the last email id from the database.
+
+    Returns:
+        int: The last email id.
+    """
+
+    with Session.begin() as session:
+        last_email = session.query(Email).order_by(Email.timestamp.desc()).first()
+        if last_email:
+            return last_email.email_id
+        return 0

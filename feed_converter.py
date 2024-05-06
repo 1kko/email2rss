@@ -9,6 +9,7 @@ and converts them into an RSS feed. The RSS feed is then saved to a file.
 from __future__ import annotations
 
 import datetime
+import email.header
 import imaplib
 import email
 import re
@@ -161,15 +162,19 @@ def generate_rss(sender, messages):
     try:
         fg = FeedGenerator()
         fg.title(f"{sender}")
-        fg.link(href="http://#", rel="alternate")
+        fg.link(href=f"http://{extract_domain_address(sender)}", rel="alternate")
         fg.description(f"RSS feed for emails from {sender}")
 
         for mail_item in messages:
             msg = email.message_from_bytes(mail_item.content)
             fe = fg.add_entry()
-            fe.title(msg["subject"] or "No Subject")
+
+            title = email.header.make_header(email.header.decode_header(msg["subject"]))
+            fe.title(str(title))
 
             fe.link(href=f"https://{extract_domain_address(sender)}")
+            fe.published(email.utils.parsedate_to_datetime(msg["date"]))
+            fe.author({"name": sender, "email": extract_email_address(sender)})
 
             # Assuming the email payload might be in different parts or encoded
             if msg.is_multipart():
@@ -263,9 +268,17 @@ def main():
 
     try:
         service = connect_to_gmail(imap_server, userid, userpw, mailbox)
+        before_id = db.get_last_email_id()
         _ = fetch_emails(service, since=since)
+        after_id = db.get_last_email_id()
 
         DIRECTORY = config.get("directory", "rss_feed")
+
+        # don't build if the email id is same.
+        # if last email id is same, no need to build the rss feed.
+        if before_id == after_id:
+            logging.info("No new emails found. Skipping RSS feed generation.")
+            return
 
         for sender in db.get_senders():
             messages = db.get_email(sender)
