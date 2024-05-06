@@ -13,3 +13,4 @@ logging.basicConfig(
     format="%(asctime)s - %(levelname)s - %(message)s - %(filename)s:%(lineno)d",
     handlers=[logging.FileHandler("email_to_rss.log"), logging.StreamHandler()],
 )
+

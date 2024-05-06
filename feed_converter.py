@@ -5,8 +5,6 @@
 This script connects to a Gmail account, fetches emails from a specific mailbox,
 and converts them into an RSS feed. The RSS feed is then saved to a file.
 
-Author: 1kko
-
 """
 from __future__ import annotations
 
@@ -19,6 +17,7 @@ from pathlib import Path
 from feedgen.feed import FeedGenerator
 
 from common import logging, config
+import database as db
 
 
 def extract_email_address(email_address: str, default: str | None = None) -> str:
@@ -36,7 +35,7 @@ def extract_email_address(email_address: str, default: str | None = None) -> str
     """
     match = re.search(r"[\w\.-]+@[\w\.-]+", email_address)
     if match:
-        email_address = match.group(0)
+        email_address = match.group(0).lower()
     else:
         email_address = default
     return email_address
@@ -104,6 +103,8 @@ def fetch_emails(mail, since=10):
         Exception: If there is an error while fetching or processing emails.
     """
     logging.info("Fetching emails")
+
+    # TODO: need to fetch from database for the latest timestamp if since is None.
     last_n_day = (datetime.date.today() - datetime.timedelta(days=since)).strftime(
         "%d-%b-%Y"
     )
@@ -117,9 +118,22 @@ def fetch_emails(mail, since=10):
             _, data = mail.fetch(num, "(RFC822)")
             msg = email.message_from_bytes(data[0][1])
             sender = extract_email_address(msg["from"], default="unknown@email.com")
+            receiver = extract_email_address(msg["to"], default="you@email.com")
             logging.info(
                 f"Email from {sender}. title: {msg['subject']} by {msg['date']}"
             )
+            article_date = email.utils.parsedate_to_datetime(msg["date"])
+
+            # save to database
+            db.save_email(
+                sender=sender,
+                receiver=receiver,
+                subject=msg["subject"],
+                email_id=int(num),
+                content=data[0][1],
+                timestamp=article_date,
+            )
+
             if sender not in emails:
                 emails[sender] = []
             emails[sender].append(msg)
@@ -150,7 +164,8 @@ def generate_rss(sender, messages):
         fg.link(href="http://#", rel="alternate")
         fg.description(f"RSS feed for emails from {sender}")
 
-        for msg in messages:
+        for mail_item in messages:
+            msg = email.message_from_bytes(mail_item.content)
             fe = fg.add_entry()
             fe.title(msg["subject"] or "No Subject")
 
@@ -238,15 +253,23 @@ def main():
     user_email = config.get("user_email")
     app_password = config.get("app_password")
 
+    # if emails.db does not exist since should be 30, otherwise 1
+    # 30 to populate the rss feed for the first time
+    since = 1
+    if db.get_entry_count() == 0:
+        since = 30
+
     try:
         service = connect_to_gmail(user_email, app_password)
-        emails_by_sender = fetch_emails(service, since=1)
+        _ = fetch_emails(service, since=since)
+
         DIRECTORY = config.get("directory", "rss_feed")
 
-        # need to sort the emails by sender and feed to generate_rss
-        for sender, messages in emails_by_sender.items():
+        for sender in db.get_senders():
+            messages = db.get_email(sender)
             rss_feed = generate_rss(sender, messages)
             _ = save_feed(sender, rss_feed, save_path=DIRECTORY)
+
     except Exception as e:
         logging.error(f"An error occurred during execution: {e}")
 

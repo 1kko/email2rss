@@ -130,3 +130,6 @@ dmypy.json
 
 # output directory
 rss_feed/*.xml
+
+# database
+*.db
