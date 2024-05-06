@@ -8,7 +8,8 @@
 # 7. Copy the password (without spaces between words), and paste into app_password
 # 8. save this file as .env
 
-DIRECTORY = "rss_feed"
-PORT = 8000
-user_email = 'your@email.here'
-app_password = 'your_password_here'
+
+DIRECTORY=rss_feed
+PORT=8000
+user_email=your@email.here
+app_password=your_password_here
