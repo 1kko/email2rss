@@ -1,3 +1,7 @@
+"""
+Common functions and variables used by multiple scripts.
+"""
+
 import logging
 from dotenv import dotenv_values
 

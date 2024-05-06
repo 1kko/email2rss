@@ -13,11 +13,12 @@ from __future__ import annotations
 import datetime
 import imaplib
 import email
-from common import logging, config
 import re
 from pathlib import Path
 
 from feedgen.feed import FeedGenerator
+
+from common import logging, config
 
 
 def extract_email_address(email_address: str, default: str | None = None) -> str:
@@ -211,7 +212,7 @@ def save_feed(sender, feed_content, save_path="rss_feed"):
         xml_filename = Path(f"{sanitized_email}.xml")
         save_path = output_dir / xml_filename
 
-        with open(save_path, "w") as f:
+        with open(save_path, "w", encoding="utf-8") as f:
             f.write(feed_content)
         logging.info(f"Saved RSS feed to file {save_path}.")
         return save_path
@@ -221,6 +222,19 @@ def save_feed(sender, feed_content, save_path="rss_feed"):
 
 
 def main():
+    """
+    Entry point of the email to RSS feed converter.
+
+    This function connects to Gmail using the provided user email and app password,
+    fetches emails from the last 24 hours, generates an RSS feed for each sender,
+    and saves the generated feed to a specified directory.
+
+    Raises:
+        Exception: If an error occurs during execution.
+
+    Returns:
+        None
+    """
     user_email = config.get("user_email")
     app_password = config.get("app_password")
 
@@ -232,7 +246,7 @@ def main():
         # need to sort the emails by sender and feed to generate_rss
         for sender, messages in emails_by_sender.items():
             rss_feed = generate_rss(sender, messages)
-            filename = save_feed(sender, rss_feed, save_path=DIRECTORY)
+            _ = save_feed(sender, rss_feed, save_path=DIRECTORY)
     except Exception as e:
         logging.error(f"An error occurred during execution: {e}")
 
