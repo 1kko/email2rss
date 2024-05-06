@@ -5,6 +5,7 @@ Database module for the application.
 import datetime
 
 from sqlalchemy import create_engine, Column, Integer, String, Text, DateTime, BLOB
+from sqlalchemy.pool import NullPool
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.ext.declarative import declarative_base
 
@@ -34,7 +35,7 @@ class Email(Base):
     timestamp = Column(DateTime, default=datetime.datetime.utcnow)
 
 
-engine = create_engine("sqlite:///emails.db")
+engine = create_engine("sqlite:///emails.db", poolclass=NullPool)
 Base.metadata.create_all(engine)
 
 Session = sessionmaker(bind=engine)
@@ -63,21 +64,21 @@ def save_email(
         None
     """
 
-    session = Session()
-    existing_email = session.query(Email).filter_by(email_id=email_id).first()
-    if existing_email is None:
-        email = Email(
-            sender=sender,
-            receiver=receiver,
-            email_id=email_id,
-            subject=subject,
-            content=content,
-            timestamp=timestamp,
-        )
-        session.add(email)
-        session.commit()
-    else:
-        print(f"Email with id {email_id} already exists. Discarding.")
+    with Session.begin() as session:
+        existing_email = session.query(Email).filter_by(email_id=email_id).first()
+        if existing_email is None:
+            email = Email(
+                sender=sender,
+                receiver=receiver,
+                email_id=email_id,
+                subject=subject,
+                content=content,
+                timestamp=timestamp,
+            )
+            session.add(email)
+            session.commit()
+        else:
+            print(f"Email with id {email_id} already exists. Discarding.")
 
 
 def get_email(sender: str) -> list:
@@ -91,14 +92,14 @@ def get_email(sender: str) -> list:
         list: A list of email objects.
     """
 
-    session = Session()
-    emails = (
-        session.query(Email)
-        .filter_by(sender=sender)
-        .order_by(Email.timestamp.desc())
-        .limit(100)
-    )
-    return emails
+    with Session.begin() as session:
+        emails = (
+            session.query(Email)
+            .filter_by(sender=sender)
+            .order_by(Email.timestamp.desc())
+            .limit(100)
+        )
+        return emails
 
 
 def get_senders() -> list:
@@ -109,9 +110,9 @@ def get_senders() -> list:
         list: A list of unique sender email addresses.
     """
 
-    session = Session()
-    senders = session.query(Email.sender).distinct().all()
-    return [sender[0] for sender in senders]
+    with Session.begin() as session:
+        senders = session.query(Email.sender).distinct().all()
+        return [sender[0] for sender in senders]
 
 
 def get_entry_count():
@@ -122,5 +123,5 @@ def get_entry_count():
         bool: True if the database is empty, False otherwise.
     """
 
-    session = Session()
-    return session.query(Email).count()
+    with Session.begin() as session:
+        return session.query(Email).count()
