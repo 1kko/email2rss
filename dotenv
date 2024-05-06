@@ -1,0 +1,14 @@
+# Instruction
+# 1. Go to your Google Account.
+# 2. Select Security.
+# 3. Under "How you sign in to Google," select 2-Step Verification.
+# 4. At the bottom of the page, select App passwords.
+# 5. Enter a name that helps you remember where you'll use the app password.
+# 6. Select Generate.
+# 7. Copy the password (without spaces between words), and paste into app_password
+# 8. save this file as .env
+
+DIRECTORY = "rss_feed"
+PORT = 8000
+user_email = 'your@email.here'
+app_password = 'your_password_here'
