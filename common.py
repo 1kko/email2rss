@@ -20,8 +20,9 @@ config = {
 }
 
 # Set up logging
+logging_path=os.path.join(config.get("data_dir"), "email2rss.log")
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s",
-    handlers=[logging.FileHandler("email2rss.log"), logging.StreamHandler()],
+    handlers=[logging.FileHandler(logging_path), logging.StreamHandler()],
 )
