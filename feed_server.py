@@ -18,7 +18,7 @@ class SimpleHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
     """
 
     def __init__(self, *args, **kwargs):
-        directory = kwargs.get("directory", "rss_feed")
+        directory = kwargs.get("directory")
         kwargs.pop("directory", None)
         super().__init__(*args, directory=directory, **kwargs)
 
@@ -36,7 +36,7 @@ class SimpleHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
 def run(
     server_class=http.server.HTTPServer,
     handler_class=SimpleHTTPRequestHandler,
-    directory="data/rss_feed",
+    directory="data/feed",
     port=config.get("port"),
     certfile=None,
     keyfile=None,
@@ -49,7 +49,7 @@ def run(
         handler_class (class): The request handler class to use.
                                Defaults to SimpleHTTPRequestHandler.
         directory (str): The directory from which to serve the static files.
-                         Defaults to "rss_feed".
+                         Defaults to "data/feed".
         port (int): The port number on which to run the server. Defaults to 8000.
     """
     server_address = ("", port)
@@ -81,8 +81,8 @@ def main():
     Returns:
     None
     """
-    directory = config.get("data_dir", "data/rss_feed")
-    port = config.get("port", 8000)
+    directory = os.path.join(config.get("data_dir"), "feed")
+    port = config.get("port")
 
     # Ensure the directory exists
     if not os.path.exists(directory):
