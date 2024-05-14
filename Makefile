@@ -2,9 +2,11 @@ PROJECT_NAME = "email2rss"
 
 all: 
 	docker build -t ${PROJECT_NAME} .
+	docker image prune -f
 
 build: 
 	docker build -t ${PROJECT_NAME} .
+	docker image prune -f
 	
 run:
 	docker run --rm -it -p 8000:8000/tcp --env-file .env -v $(PWD)/data:/app/data ${PROJECT_NAME}:latest 
