@@ -4,6 +4,8 @@ Common functions and variables used by multiple scripts.
 
 import os
 import logging
+from logging.handlers import TimedRotatingFileHandler
+
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -19,8 +21,16 @@ config = {
     "max_item_per_feed": int(os.getenv("max_item_per_feed", "100")),
 }
 
+
 # Set up logging
-logging_path=os.path.join(config.get("data_dir"), "email2rss.log")
+logging_path = os.path.join(config.get("data_dir"), "email2rss.log")
+
+# Create a timed rotating file handler that rotates the log file every week
+file_handler = TimedRotatingFileHandler(
+    logging_path, when="D", interval=1, backupCount=15
+)
+
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s",
