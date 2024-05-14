@@ -30,8 +30,10 @@ class SimpleHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
             # The file is not an XML file, send a 404 Not Found response
             self.send_error(404, "File not found")
         else:
+            logging.info(f"Serving {self.path}")
             # The file is an XML file, serve it
             super().do_GET()
+
 
 def run(
     server_class=http.server.HTTPServer,
@@ -58,13 +60,13 @@ def run(
     handler = functools.partial(handler_class, directory=directory)
 
     httpd = server_class(server_address, handler)
-    
+
     # If certfile and keyfile are provided, run the server with SSL
     if certfile and keyfile:
         httpd.socket = ssl.wrap_socket(
             httpd.socket, certfile=certfile, keyfile=keyfile, server_side=True
         )
-    
+
     logging.info(f"Serving {directory}/ to HTTP http://0.0.0.0:{port}/")
     httpd.serve_forever()
 
@@ -81,6 +83,9 @@ def main():
     Returns:
     None
     """
+    # configure logging
+    logging.basicConfig(level=logging.INFO)
+
     directory = os.path.join(config.get("data_dir"), "feed")
     port = config.get("port")
 
