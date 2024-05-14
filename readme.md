@@ -66,6 +66,9 @@ keyfile="/etc/letsencrypt/live/your-domain.com/privkey.pem"
 4. Run `make run` to start the container.
 5. Browse to `http://localhost:8000` to see the generated RSS feeds.
 
+## Tip
+You might want to use Tailscale's `funnel` to serve your local server to the internet. This way you can access your RSS feeds from anywhere.
+
 ## License
 
 MIT
