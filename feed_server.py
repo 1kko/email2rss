@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """
-A Simple python webserver which serves only `rss_feed` folder and only xml files.
+A Simple python web server which serves only `rss_feed` folder and only xml files.
 """
 from __future__ import annotations
 
 import os
 import functools
 import http.server
+import ssl
 
 from common import logging, config
 
@@ -21,12 +22,24 @@ class SimpleHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
         kwargs.pop("directory", None)
         super().__init__(*args, directory=directory, **kwargs)
 
+    def do_GET(self):
+        """
+        Serve a GET request.
+        """
+        if self.path.endswith(".db"):
+            # The file is not an XML file, send a 404 Not Found response
+            self.send_error(404, "File not found")
+        else:
+            # The file is an XML file, serve it
+            super().do_GET()
 
 def run(
     server_class=http.server.HTTPServer,
     handler_class=SimpleHTTPRequestHandler,
-    directory="rss_feed",
-    port=8000,
+    directory="data/rss_feed",
+    port=config.get("port"),
+    certfile=None,
+    keyfile=None,
 ):
     """
     Run an HTTP server to serve static files from a specified directory.
@@ -45,6 +58,13 @@ def run(
     handler = functools.partial(handler_class, directory=directory)
 
     httpd = server_class(server_address, handler)
+    
+    # If certfile and keyfile are provided, run the server with SSL
+    if certfile and keyfile:
+        httpd.socket = ssl.wrap_socket(
+            httpd.socket, certfile=certfile, keyfile=keyfile, server_side=True
+        )
+    
     logging.info(f"Serving {directory}/ to HTTP http://0.0.0.0:{port}/")
     httpd.serve_forever()
 
@@ -61,7 +81,7 @@ def main():
     Returns:
     None
     """
-    directory = config.get("directory", "rss_feed")
+    directory = config.get("data_dir", "data/rss_feed")
     port = config.get("port", 8000)
 
     # Ensure the directory exists

@@ -8,7 +8,7 @@ WORKDIR /app
 RUN pip install poetry
 
 # Add the current directory contents into the container at /app
-COPY pyproject.toml poetry.lock /app
+COPY pyproject.toml poetry.lock /app/
 
 # Use Poetry to install dependencies
 RUN poetry config virtualenvs.create false \

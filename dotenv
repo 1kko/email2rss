@@ -6,10 +6,14 @@
 # 5. Enter a name that helps you remember where you'll use the app password.
 # 6. Select Generate.
 # 7. Copy the password (without spaces between words), and paste into app_password
+# 9. change other values as needed
 # 8. save this file as .env
 
 
-DIRECTORY=rss_feed
-PORT=8000
-user_email=your@email.here
-app_password=your_password_here
+imap_server=imap.gmail.com
+userid=your@email.here
+userpw=your_password_here
+mailbox=mailbox_label_or_folder_name_here
+port=8000
+refresh_seconds=300
+data_dir=data

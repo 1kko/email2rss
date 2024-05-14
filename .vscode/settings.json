@@ -1,0 +1,15 @@
+{
+    "cSpell.words": [
+        "certbot",
+        "certfile",
+        "disp",
+        "feedgen",
+        "fullchain",
+        "keyfile",
+        "letsencrypt",
+        "poolclass",
+        "privkey",
+        "sessionmaker",
+        "userid"
+    ]
+}

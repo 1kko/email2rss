@@ -9,6 +9,8 @@ from sqlalchemy.pool import NullPool
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.ext.declarative import declarative_base
 
+from common import config
+
 Base = declarative_base()
 
 
@@ -34,8 +36,8 @@ class Email(Base):
     content = Column(BLOB)
     timestamp = Column(DateTime, default=datetime.datetime.utcnow)
 
-
-engine = create_engine("sqlite:///emails.db", poolclass=NullPool)
+data_dir = config.get("data_dir", "data")
+engine = create_engine(f"sqlite:///{data_dir}/emails.db", poolclass=NullPool)
 Base.metadata.create_all(engine)
 
 Session = sessionmaker(bind=engine)
@@ -92,12 +94,14 @@ def get_email(sender: str) -> list:
         list: A list of email objects.
     """
 
+    max_item_per_feed = config.get("max_item_per_feed")
+
     with Session.begin() as session:
         emails = (
             session.query(Email)
             .filter_by(sender=sender)
             .order_by(Email.timestamp.desc())
-            .limit(100)
+            .limit(max_item_per_feed)
         )
         return emails
 

@@ -9,7 +9,8 @@ import multiprocessing
 import time
 
 import feed_converter
-import static_serve
+import feed_server
+from common import logging, config
 
 
 def fetch_and_generate():
@@ -23,16 +24,18 @@ def fetch_and_generate():
     Returns:
         None
     """
+    refresh_seconds = config.get("refresh_seconds", 300)
     while True:
         feed_converter.main()
-        time.sleep(120)
+        logging.info(f"waiting for {refresh_seconds} seconds")
+        time.sleep(refresh_seconds)
 
 
 def serve():
     """
     Starts the server and serves the static files.
     """
-    static_serve.main()
+    feed_server.main()
 
 
 if __name__ == "__main__":

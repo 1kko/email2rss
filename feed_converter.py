@@ -8,12 +8,15 @@ and converts them into an RSS feed. The RSS feed is then saved to a file.
 """
 from __future__ import annotations
 
+import os
 import datetime
-import email.header
-import imaplib
-import email
 import re
 from pathlib import Path
+
+import email
+import email.header
+from email.utils import parseaddr
+import imaplib
 
 from feedgen.feed import FeedGenerator
 
@@ -40,6 +43,23 @@ def extract_email_address(email_address: str, default: str | None = None) -> str
     else:
         email_address = default
     return email_address
+
+
+def extract_name_from_email(email_address: str) -> str:
+    """
+    Extracts the name from an email address.
+
+    Args:
+        email_address (str): The email address.
+
+    Returns:
+        str: The name extracted from the email address,
+             or email address itself if no name is found.
+    """
+    name, addr = parseaddr(email_address)
+    if name:
+        return name
+    return addr
 
 
 def extract_domain_address(email_address: str, default=None) -> str:
@@ -174,17 +194,17 @@ def generate_rss(sender, messages):
 
             fe.link(href=f"https://{extract_domain_address(sender)}")
             fe.published(email.utils.parsedate_to_datetime(msg["date"]))
-            fe.author({"name": sender, "email": extract_email_address(sender)})
+            fe.author({"name": extract_name_from_email(msg['from']), "email": extract_email_address(sender)})
 
             # Assuming the email payload might be in different parts or encoded
             if msg.is_multipart():
                 content = ""
                 for part in msg.walk():
-                    ctype = part.get_content_type()
-                    cdispo = str(part.get("Content-Disposition"))
+                    c_type = part.get_content_type()
+                    c_disp = str(part.get("Content-Disposition"))
 
                     # Skip any text/plain (txt) attachments
-                    if ctype == "text/plain" and "attachment" not in cdispo:
+                    if c_type == "text/plain" and "attachment" not in c_disp:
                         charset = part.get_content_charset()
                         if charset is not None:
                             content += part.get_payload(decode=True).decode(charset)
@@ -272,7 +292,7 @@ def main():
         _ = fetch_emails(service, since=since)
         after_id = db.get_last_email_id()
 
-        DIRECTORY = config.get("directory", "rss_feed")
+        data_feed_dir = os.path.join(config.get("data_dir"), "feed")
 
         # don't build if the email id is same.
         # if last email id is same, no need to build the rss feed.
@@ -283,7 +303,7 @@ def main():
         for sender in db.get_senders():
             messages = db.get_email(sender)
             rss_feed = generate_rss(sender, messages)
-            _ = save_feed(sender, rss_feed, save_path=DIRECTORY)
+            _ = save_feed(sender, rss_feed, save_path=data_feed_dir)
 
     except Exception as e:
         logging.error(f"An error occurred during execution: {e}")
