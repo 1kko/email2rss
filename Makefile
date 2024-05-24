@@ -9,10 +9,12 @@ build:
 	docker image prune -f
 	
 run:
-	docker run --rm -it -p 8000:8000/tcp --env-file .env -v $(PWD)/data:/app/data ${PROJECT_NAME}:latest 
+	docker stop ${PROJECT_NAME}
+	docker run --rm -it -p 8000:8000/tcp --name ${PROJECT_NAME} --env-file .env -v $(PWD)/data:/app/data ${PROJECT_NAME}:latest 
 
 serve:
-	docker run -d -p 8000:8000/tcp --env-file .env -v $(PWD)/data:/app/data ${PROJECT_NAME}:latest
+	docker stop ${PROJECT_NAME}
+	docker run -d -p 8000:8000/tcp --name ${PROJECT_NAME} --env-file .env -v $(PWD)/data:/app/data ${PROJECT_NAME}:latest
 
 shell:
 	docker exec -it ${PROJECT_NAME}:latest /bin/bash
