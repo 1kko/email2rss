@@ -30,7 +30,9 @@ class SimpleHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
             # The file is not an XML file, send a 404 Not Found response
             self.send_error(404, "File not found")
         else:
-            logging.info(f"Serving {self.path}")
+            logging.info(
+                f"Serving ip={self.client_address[0]} headers={self.headers} {self.path}"
+            )
             # The file is an XML file, serve it
             super().do_GET()
 
