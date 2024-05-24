@@ -63,9 +63,9 @@ def run(
 
     # If certfile and keyfile are provided, run the server with SSL
     if certfile and keyfile:
-        httpd.socket = ssl.wrap_socket(
-            httpd.socket, certfile=certfile, keyfile=keyfile, server_side=True
-        )
+        context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        context.load_cert_chain(certfile, keyfile)
+        httpd.socket = context.wrap_socket(httpd.socket, server_side=True)
 
     logging.info(f"Serving {directory}/ to HTTP http://0.0.0.0:{port}/")
     httpd.serve_forever()

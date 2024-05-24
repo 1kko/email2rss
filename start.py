@@ -8,7 +8,8 @@ and serve the feeds as an HTTP server.
 import multiprocessing
 import time
 
-import feed_converter
+import email_fetcher
+import feed_generator
 import feed_server
 from common import logging, config
 
@@ -26,7 +27,8 @@ def fetch_and_generate():
     """
     refresh_seconds = config.get("refresh_seconds", 300)
     while True:
-        feed_converter.main()
+        email_fetcher.main()
+        feed_generator.main()
         logging.info(f"waiting for {refresh_seconds} seconds")
         time.sleep(refresh_seconds)
 

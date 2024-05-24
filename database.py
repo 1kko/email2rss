@@ -36,6 +36,7 @@ class Email(Base):
     content = Column(BLOB)
     timestamp = Column(DateTime, default=datetime.datetime.utcnow)
 
+
 data_dir = config.get("data_dir", "data")
 engine = create_engine(f"sqlite:///{data_dir}/emails.db", poolclass=NullPool)
 Base.metadata.create_all(engine)
@@ -66,7 +67,7 @@ def save_email(
         None
     """
 
-    with Session.begin() as session:
+    with Session() as session:
         existing_email = session.query(Email).filter_by(email_id=email_id).first()
         if existing_email is None:
             email = Email(
@@ -96,11 +97,11 @@ def get_email(sender: str) -> list:
 
     max_item_per_feed = config.get("max_item_per_feed")
 
-    with Session.begin() as session:
+    with Session() as session:
         emails = (
             session.query(Email)
             .filter_by(sender=sender)
-            .order_by(Email.timestamp.desc())
+            .order_by(Email.timestamp.asc())
             .limit(max_item_per_feed)
         )
         return emails
@@ -114,7 +115,7 @@ def get_senders() -> list:
         list: A list of unique sender email addresses.
     """
 
-    with Session.begin() as session:
+    with Session() as session:
         senders = session.query(Email.sender).distinct().all()
         return [sender[0] for sender in senders]
 
@@ -127,7 +128,7 @@ def get_entry_count():
         bool: True if the database is empty, False otherwise.
     """
 
-    with Session.begin() as session:
+    with Session() as session:
         return session.query(Email).count()
 
 
@@ -139,7 +140,7 @@ def get_last_email_id():
         int: The last email id.
     """
 
-    with Session.begin() as session:
+    with Session() as session:
         last_email = session.query(Email).order_by(Email.timestamp.desc()).first()
         if last_email:
             return last_email.email_id

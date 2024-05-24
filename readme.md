@@ -69,6 +69,10 @@ keyfile="/etc/letsencrypt/live/your-domain.com/privkey.pem"
 ## Tip
 You might want to use Tailscale's `funnel` to serve your local server to the internet. This way you can access your RSS feeds from anywhere.
 
+In case you face problem installing it in raspi,
+try:
+`PYTHON_KEYRING_BACKEND=keyring.backends.null.Keyring poetry install`
+
 ## License
 
 MIT
