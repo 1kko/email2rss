@@ -61,9 +61,6 @@ def generate_rss(sender, messages):
                 channel_data["pubDate"] = feed_entry.published()
             elif channel_data.get("pubDate") < feed_entry.published():
                 channel_data["pubDate"] = feed_entry.published()
-            else:
-                pass
-
             # make feed name using email's sender name.
             channel_name = email.utils.parseaddr(msg["from"])[0]
             if len(channel_name) > 0:
@@ -104,7 +101,14 @@ def generate_rss(sender, messages):
                     feed_entry.description(msg.get_payload())
 
         # update channel data
-        channel.title(channel_data.get("name"))
+        channel_title_dec = email.header.decode_header(channel_data.get("name"))
+        channel_title = "".join(
+            [
+                str(title, encoding or "utf-8") if isinstance(title, bytes) else title
+                for title, encoding in channel_title_dec
+            ]
+        )
+        channel.title(str(channel_title))
         channel.pubDate(channel_data.get("pubDate"))
 
         logging.info(f"Generated RSS feed for {sender}.")
