@@ -19,7 +19,12 @@ from feedgen.feed import FeedGenerator
 
 import database as db
 from common import logging, config
-from util import extract_email_address, extract_name_from_email, extract_domain_address
+from util import (
+    extract_email_address,
+    extract_name_from_email,
+    extract_domain_address,
+    utf8_decoder,
+)
 
 
 def generate_rss(sender, messages):
@@ -72,7 +77,7 @@ def generate_rss(sender, messages):
 
             feed_entry.author(
                 {
-                    "name": extract_name_from_email(msg["from"]),
+                    "name": utf8_decoder(extract_name_from_email(msg["from"])),
                     "email": extract_email_address(sender),
                 }
             )
@@ -101,14 +106,7 @@ def generate_rss(sender, messages):
                     feed_entry.description(msg.get_payload())
 
         # update channel data
-        channel_title_dec = email.header.decode_header(channel_data.get("name"))
-        channel_title = "".join(
-            [
-                str(title, encoding or "utf-8") if isinstance(title, bytes) else title
-                for title, encoding in channel_title_dec
-            ]
-        )
-        channel.title(str(channel_title))
+        channel.title(utf8_decoder(channel_data.get("name")))
         channel.pubDate(channel_data.get("pubDate"))
 
         logging.info(f"Generated RSS feed for {sender}.")

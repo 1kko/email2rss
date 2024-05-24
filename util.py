@@ -5,6 +5,7 @@ This is a utility module that contains functions for extracting email addresses 
 
 import re
 import email
+import email.header
 
 
 def extract_email_address(email_address: str, default: str | None = None) -> str:
@@ -64,3 +65,29 @@ def extract_domain_address(email_address: str, default=None) -> str:
     else:
         domain = default
     return domain
+
+
+def utf8_decoder(data: bytes):
+    """
+    Decodes a list of byte strings using UTF-8 encoding.
+
+    Args:
+        data (bytes): A list of byte strings to be decoded.
+
+    Returns:
+        str: The decoded string.
+
+    """
+    dec_data = email.header.decode_header(data)
+    return str(
+        "".join(
+            [
+                (
+                    str(title, encoding or "utf-8")
+                    if isinstance(title, bytes)
+                    else str(title)
+                )
+                for title, encoding in dec_data
+            ]
+        )
+    )
