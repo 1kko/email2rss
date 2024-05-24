@@ -24,6 +24,7 @@ from util import (
     extract_name_from_email,
     extract_domain_address,
     utf8_decoder,
+    cleanse_content,
 )
 
 
@@ -62,13 +63,14 @@ def generate_rss(sender, messages):
             feed_entry.updated(email.utils.parsedate_to_datetime(msg["date"]))
 
             # Update the channel_data['pubDate'] to the latest email date
-            if channel_data.get("pubDate") is None:
+            if (
+                channel_data.get("pubDate") is None
+                or channel_data.get("pubDate") < feed_entry.published()
+            ):
                 channel_data["pubDate"] = feed_entry.published()
-            elif channel_data.get("pubDate") < feed_entry.published():
-                channel_data["pubDate"] = feed_entry.published()
-            # make feed name using email's sender name.
+
             channel_name = email.utils.parseaddr(msg["from"])[0]
-            if len(channel_name) > 0:
+            if channel_name:
                 channel_data["name"] = channel_name
 
             unique_string = msg["subject"] + msg["date"] + msg["from"]
@@ -82,30 +84,44 @@ def generate_rss(sender, messages):
                 }
             )
 
-            # Assuming the email payload might be in different parts or encoded
+            content = ""
+            html_content = None
             if msg.is_multipart():
-                content = ""
                 for part in msg.walk():
                     c_type = part.get_content_type()
                     c_disp = str(part.get("Content-Disposition"))
-
-                    # Skip any text/plain (txt) attachments
-                    if c_type == "text/plain" and "attachment" not in c_disp:
-                        charset = part.get_content_charset()
-                        if charset is not None:
-                            content += part.get_payload(decode=True).decode(charset)
-                        else:
-                            content += part.get_payload()
-                feed_entry.description(content)
+                    if "attachment" not in c_disp:
+                        charset = (
+                            part.get_content_charset() or "utf-8"
+                        )  # Default charset to utf-8
+                        if c_type == "text/html":
+                            html_content = cleanse_content(
+                                part.get_payload(decode=True).decode(
+                                    charset, errors="ignore"
+                                )
+                            )
+                        elif c_type == "text/plain" and html_content is None:
+                            content = cleanse_content(
+                                part.get_payload(decode=True).decode(
+                                    charset, errors="ignore"
+                                )
+                            )
             else:
-                # Non-multipart emails are simpler, just get the payload directly
-                charset = msg.get_content_charset()
-                if charset is not None:
-                    feed_entry.description(msg.get_payload(decode=True).decode(charset))
-                else:
-                    feed_entry.description(msg.get_payload())
+                charset = msg.get_content_charset() or "utf-8"
+                if msg.get_content_type() == "text/html":
+                    html_content = cleanse_content(
+                        msg.get_payload(decode=True).decode(charset, errors="ignore")
+                    )
+                elif msg.get_content_type() == "text/plain":
+                    content = cleanse_content(
+                        msg.get_payload(decode=True).decode(charset, errors="ignore")
+                    )
 
-        # update channel data
+            # Prefer HTML content if available
+            feed_entry.description(
+                html_content if html_content is not None else content
+            )
+
         channel.title(utf8_decoder(channel_data.get("name")))
         channel.pubDate(channel_data.get("pubDate"))
 

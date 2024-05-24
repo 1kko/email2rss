@@ -91,3 +91,14 @@ def utf8_decoder(data: bytes):
             ]
         )
     )
+
+
+def cleanse_content(content):
+    """Remove non-XML compatible characters from content using regular expressions.
+    This function removes control characters and NULL bytes, except for tab (ASCII 9),
+    line feed (ASCII 10), and carriage return (ASCII 13), which are valid in XML.
+    """
+    # Regex to match invalid XML characters
+    # This pattern excludes ASCII values 9 (tab), 10 (newline), and 13 (carriage return), which are acceptable in XML.
+    invalid_xml_chars = re.compile(r"[\x00-\x08\x0B\x0C\x0E-\x1F]")
+    return invalid_xml_chars.sub("", content)
