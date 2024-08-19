@@ -36,6 +36,15 @@ class SimpleHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
             # The file is an XML file, serve it
             super().do_GET()
 
+    def log_message(self, format, *args):
+        """
+        Log an arbitrary message.
+
+        This is used by all other logging functions.
+        Override it to log messages to the logging module.
+        """
+        logging.info(f"{self.client_address[0]} - {format % args}")
+        
 
 def run(
     server_class=http.server.HTTPServer,
