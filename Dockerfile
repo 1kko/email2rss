@@ -25,7 +25,7 @@ COPY *.py /app/
 RUN chmod +x start.py
 
 # Make port 8000 available to the world outside this container
-EXPOSE 8000
+EXPOSE 3011
 
 # Run start.py when the container launches
 ENTRYPOINT ["./start.py"]
