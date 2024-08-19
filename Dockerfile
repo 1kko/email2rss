@@ -8,11 +8,14 @@ WORKDIR /app
 # Update the system package
 RUN apt update && apt upgrade -y
 
-# Upgrade pip
-RUN python -m pip install --upgrade pip
+# install PIP
+RUN apt install -y python3-pip
 
 # Install Poetry
-RUN pip install poetry
+RUN pip3 install poetry --break-system-packages
+
+# Install Poetry
+# RUN pipx install poetry
 
 # Add the current directory contents into the container at /app
 COPY pyproject.toml poetry.lock /app/
