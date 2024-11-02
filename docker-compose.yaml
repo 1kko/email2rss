@@ -1,0 +1,24 @@
+services:
+  fetch_and_generate:
+    build:
+      context: .
+      dockerfile: Dockerfile.fetch_and_generate
+    container_name: fetch_and_generate
+    restart: unless-stopped
+    volumes:
+      - ./data:/app/data
+    env_file:
+      - .env
+
+  serve:
+    build:
+      context: .
+      dockerfile: Dockerfile.serve
+    container_name: serve
+    ports:
+      - "3011"
+    restart: unless-stopped
+    volumes:
+      - ./data:/app/data
+    env_file:
+      - .env
