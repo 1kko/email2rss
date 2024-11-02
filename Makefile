@@ -1,37 +1,27 @@
 PROJECT_NAME = "email2rss"
 
-all:
-	docker image prune -f
-	docker build -t ${PROJECT_NAME} .
+all: build
 
 build:
-	docker image prune -f
-	docker build -t ${PROJECT_NAME} .
+	docker compose build
 
 run:
-	echo "stopping previous container"
-	-docker stop ${PROJECT_NAME}
-	echo "removing ${PROJECT_NAME}"
-	-docker container rm ${PROJECT_NAME}
-	echo "start running"
-	docker run --rm -it -p 8000:8000/tcp --name ${PROJECT_NAME} --env-file .env -v $(PWD)/data:/app/data ${PROJECT_NAME}:latest
+	docker compose up
 
 serve:
-	echo "stopping previous container"
-	-docker stop ${PROJECT_NAME}
-	echo "removing ${PROJECT_NAME}"
-	-docker container rm ${PROJECT_NAME}
-	echo "start running"
-	docker run -d -p 8000:8000/tcp --name ${PROJECT_NAME} --env-file .env -v $(PWD)/data:/app/data ${PROJECT_NAME}:latest
+	docker compose up -d
+
+stop:
+	docker compose down
 
 shell:
-	docker exec -it ${PROJECT_NAME}:latest /bin/bash
+	docker compose exec fetch_and_generate /bin/bash
 
 clean:
-	dokcer image prune -f
+	docker compose down --rmi all
 	# rm -rf __pycache__/ data email.db ${PROJECT_NAME}.tar
 
 export:
-	docker save -o ${PROJECT_NAME}.tar ${PROJECT_NAME}:latest
-	echo "Docker image saved as ${PROJECT_NAME}.tar"
-	echo "To load the image, run: docker load -i ${PROJECT_NAME}.tar"
+	docker save -o ${PROJECT_NAME}.tar ${PROJECT_NAME}_fetch_and_generate:latest ${PROJECT_NAME}_serve:latest
+	echo "Docker images saved as ${PROJECT_NAME}.tar"
+	echo "To load the images, run: docker load -i ${PROJECT_NAME}.tar"
