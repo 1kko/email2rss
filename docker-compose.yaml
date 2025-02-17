@@ -15,10 +15,11 @@ services:
       context: .
       dockerfile: Dockerfile.serve
     container_name: serve
+    env_file:
+      - .env
     ports:
-      - "3011"
+      - ${port}:${port}
     restart: unless-stopped
     volumes:
       - ./data:/app/data
-    env_file:
-      - .env
+
