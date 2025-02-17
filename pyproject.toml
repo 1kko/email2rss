@@ -4,11 +4,12 @@ version = "0.1.0"
 description = ""
 authors = ["Your Name <you@example.com>"]
 readme = "README.md"
+package-mode = false
 
 
 [project]
 name = "email2rss"
-version = "0.1.0"
+version = "0.1.1"
 description = "Add your description here"
 dependencies = [
     "feedgen>=1.0.0",
@@ -39,3 +40,4 @@ sqlalchemy = "^2.0.30"
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
