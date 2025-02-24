@@ -12,19 +12,20 @@ from __future__ import annotations
 import email
 import email.header
 import hashlib
-
+import xml.etree.ElementTree as ET
+from datetime import datetime
 from pathlib import Path
+
 from feedgen.feed import FeedGenerator
 
-
 import database as db
-from common import logging, config
+from common import config, logging
 from util import (
+    cleanse_content,
+    extract_domain_address,
     extract_email_address,
     extract_name_from_email,
-    extract_domain_address,
     utf8_decoder,
-    cleanse_content,
 )
 
 
@@ -77,12 +78,10 @@ def generate_rss(sender, messages):
             guid = hashlib.md5(unique_string.encode()).hexdigest()
             feed_entry.id(guid)
 
-            feed_entry.author(
-                {
-                    "name": utf8_decoder(extract_name_from_email(msg["from"])),
-                    "email": extract_email_address(sender),
-                }
-            )
+            feed_entry.author({
+                "name": utf8_decoder(extract_name_from_email(msg["from"])),
+                "email": extract_email_address(sender),
+            })
 
             content = ""
             html_content = None
@@ -172,6 +171,96 @@ def save_feed(sender, feed_content, save_path="rss_feed"):
         raise
 
 
+def create_opml_from_files(
+    rss_files: list[Path],
+    save_path: Path,
+    output_file="subscriptions.opml",
+):
+    """
+    Create an OPML file from a list of RSS feed files or XML content strings.
+
+    Args:
+        rss_files_or_strings (list): List of file paths or raw RSS XML strings
+        save_path (str): Path to save the OPML file
+        output_file (str): Output OPML file name (default: "subscriptions.opml")
+
+    Raises:
+        Exception: If there is an error while creating the OPML file.
+
+    Input Example:
+        rss_files_or_strings = [
+             "rss_feed1.xml",  # File path example
+            \"\"\"<?xml version="1.0"?>
+            <rss version="2.0">
+                <channel>
+                    <title>Example Feed</title>
+                    <link>https://example.com/rss</link>
+                </channel>
+            </rss>\"\"\"  # Raw XML content
+        ]
+    """
+    opml = ET.Element("opml", version="1.0")
+    head = ET.SubElement(opml, "head")
+    ET.SubElement(head, "title").text = "RSS Subscriptions"
+
+    # Add date elements
+    # RFC 2822 Format (Used in many OPML examples)
+    now = datetime.now().strftime("%a, %d %b %Y %H:%M:%S %z")
+    ET.SubElement(head, "dateCreated").text = now
+    ET.SubElement(head, "dateModified").text = now
+
+    body = ET.SubElement(opml, "body")
+
+    for rss_file in rss_files:
+        try:
+            # Set the RSS feed link
+            xml_url = str(f"/{rss_file.name}")
+
+            # Parse XML from file
+            tree = ET.parse(rss_file)
+            root = tree.getroot()
+
+            # Find the feed title
+            title = None
+            for elem in root.findall(".//channel/title"):
+                title = elem.text
+                break
+
+            # Extract RSS feed URL (full or relative)
+            html_url = None
+            for elem in root.findall(".//channel/link"):
+                html_url = elem.text
+                break
+
+            if not title:
+                title = "Unknown Feed"
+
+            # Create OPML outline entry
+            ET.SubElement(
+                body,
+                "outline",
+                type="rss",
+                text=title,
+                title=title,
+                xmlUrl=xml_url,
+                htmlUrl=html_url,
+            )
+
+        except Exception as e:
+            print(f"Error processing RSS input: {e}")
+
+    # create "feed" folder if not exists
+    output_dir = Path(save_path)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    xml_filename = Path(output_file)
+    save_path = output_dir / xml_filename
+
+    # Convert to string and save
+    tree = ET.ElementTree(opml)
+    tree.write(save_path, encoding="utf-8", xml_declaration=True)
+    logging.info(f"OPML Saved RSS feed to file: {save_path}")
+
+
 def main():
     """Entry point of the email to RSS feed converter.
     Reads email messages from the database, generates an RSS feed for each sender,
@@ -181,11 +270,17 @@ def main():
     data_dir = Path(config.get("data_dir"))
     data_feed_dir = data_dir / "feed"
 
+    rss_files = []
+
     for sender in db.get_senders():
         messages = db.get_email(sender)
         logging.info(f"{sender} found entries={messages.count()}")
         rss_feed = generate_rss(sender, messages)
-        _ = save_feed(sender, rss_feed, save_path=data_feed_dir)
+        feed_file_path = save_feed(sender, rss_feed, save_path=data_feed_dir)
+        rss_files.append(feed_file_path)
+
+    # aggregate all the feeds into a single OPML file
+    create_opml_from_files(rss_files, save_path=data_feed_dir)
 
 
 # Main Execution
