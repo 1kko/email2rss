@@ -17,3 +17,4 @@ mailbox=mailbox_label_or_folder_name_here
 port=8000
 refresh_seconds=300
 data_dir=data
+server_baseurl=http_your_server_baseurl_here

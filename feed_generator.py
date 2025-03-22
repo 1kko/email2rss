@@ -15,7 +15,7 @@ import hashlib
 import xml.etree.ElementTree as ET
 import datetime
 from pathlib import Path
-
+from urllib.parse import urljoin
 from feedgen.feed import FeedGenerator
 
 import database as db
@@ -27,6 +27,13 @@ from util import (
     extract_name_from_email,
     utf8_decoder,
 )
+
+
+def add_base_url(url):
+    """Add base URL to the URL if it is not already present."""
+    if not url.startswith("http") and config.get("server_baseurl"):
+        return urljoin(config.get("server_baseurl"), url)
+    return url
 
 
 def ensure_timezone(dt):
@@ -237,7 +244,7 @@ def create_opml_from_files(
     for rss_file in rss_files:
         try:
             # Set the RSS feed link
-            xml_url = str(f"/{rss_file.name}")
+            xml_url = add_base_url(str(f"{rss_file.name}"))
 
             # Parse XML from file
             tree = ET.parse(rss_file)
