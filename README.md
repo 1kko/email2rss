@@ -55,6 +55,7 @@ mailbox=your_mailbox_name_to_fetch_emails_from
 PORT=8000
 certfile="/etc/letsencrypt/live/your-domain.com/fullchain.pem"
 keyfile="/etc/letsencrypt/live/your-domain.com/privkey.pem"
+server_baseurl=http://your-domain.com
 ```
 
 

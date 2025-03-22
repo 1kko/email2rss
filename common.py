@@ -19,6 +19,7 @@ config = {
     "refresh_seconds": int(os.getenv("refresh_seconds", "300")),
     "data_dir": os.getenv("data_dir", "data"),
     "max_item_per_feed": int(os.getenv("max_item_per_feed", "100")),
+    "server_baseurl": os.getenv("server_baseurl"),
 }
 
 
