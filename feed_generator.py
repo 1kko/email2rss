@@ -72,8 +72,21 @@ def generate_rss(sender, messages):
             title = email.header.make_header(email.header.decode_header(msg["subject"]))
             feed_entry.title(str(title))
 
-            # Extract the domain address from the sender email address
-            feed_entry.link(href=f"https://{extract_domain_address(sender)}")
+            # Generate unique GUID (needed for internal reader)
+            unique_string = msg["subject"] + msg["date"] + msg["from"]
+            guid = hashlib.md5(unique_string.encode()).hexdigest()
+            feed_entry.id(guid)
+
+            # Generate entry link based on internal reader setting
+            if config.get("enable_internal_reader"):
+                # Internal reader mode: link to internal article viewer
+                email_address = extract_email_address(sender, default="unknown@unknown.com")
+                sanitized_email = email_address.replace("@", "_").replace(".", "_")
+                internal_link = f"/article/{sanitized_email}/{guid}"
+                feed_entry.link(href=add_base_url(internal_link))
+            else:
+                # External mode: link to sender's domain
+                feed_entry.link(href=f"https://{extract_domain_address(sender)}")
 
             # Process email published and updated date
             dt = email.utils.parsedate_to_datetime(msg["date"])
@@ -89,11 +102,6 @@ def generate_rss(sender, messages):
             channel_name = email.utils.parseaddr(msg["from"])[0]
             if channel_name:
                 channel_data["name"] = channel_name
-
-            # Generate unique GUID
-            unique_string = msg["subject"] + msg["date"] + msg["from"]
-            guid = hashlib.md5(unique_string.encode()).hexdigest()
-            feed_entry.id(guid)
 
             # Process author information
             feed_entry.author({

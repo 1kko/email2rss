@@ -3,6 +3,8 @@ Database module for the application.
 """
 
 import datetime
+import email
+import hashlib
 
 from sqlalchemy import create_engine, Column, Integer, String, Text, DateTime, BLOB
 from sqlalchemy.pool import NullPool
@@ -145,3 +147,41 @@ def get_last_email_id():
         if last_email:
             return last_email.email_id
         return 0
+
+
+def get_email_by_guid(sender: str, guid: str):
+    """
+    Get an email by its sender and GUID.
+
+    The GUID is calculated as MD5(subject + date + from) from the email message.
+    This function queries emails by sender and calculates GUID for each to find a match.
+
+    Args:
+        sender (str): The sender email address
+        guid (str): The MD5 GUID hash to match
+
+    Returns:
+        Email object if found, None otherwise
+    """
+
+    with Session() as session:
+        emails = session.query(Email).filter_by(sender=sender).all()
+
+        for email_record in emails:
+            try:
+                # Parse the email content BLOB
+                msg = email.message_from_bytes(email_record.content)
+
+                # Calculate GUID using the same logic as feed_generator.py
+                unique_string = msg["subject"] + msg["date"] + msg["from"]
+                calculated_guid = hashlib.md5(unique_string.encode()).hexdigest()
+
+                # Check if this is the email we're looking for
+                if calculated_guid == guid:
+                    return email_record
+
+            except Exception as e:
+                # Skip emails that fail to parse
+                continue
+
+        return None

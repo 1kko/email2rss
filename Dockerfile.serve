@@ -19,6 +19,7 @@ RUN poetry export --without-hashes > ./requirements.txt
 RUN uv pip install --system -r requirements.txt
 
 COPY *.py /app/
+COPY static/ /app/static/
 
 RUN chmod +x start.py
 
