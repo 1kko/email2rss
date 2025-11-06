@@ -13,11 +13,18 @@
 
     // Progressive enhancement: Add loading indicator for images
     document.querySelectorAll('.content img').forEach(function(img) {
-        img.addEventListener('load', function() {
+        // Only apply fade-in effect if image is not already loaded
+        if (img.complete) {
+            // Image already loaded (cached), show it immediately
             img.style.opacity = '1';
-        });
-        img.style.opacity = '0';
-        img.style.transition = 'opacity 0.3s ease-in';
+        } else {
+            // Image still loading, fade it in when ready
+            img.style.opacity = '0';
+            img.style.transition = 'opacity 0.3s ease-in';
+            img.addEventListener('load', function() {
+                img.style.opacity = '1';
+            });
+        }
     });
 
 })();
