@@ -3,7 +3,7 @@
     --bg-color: #ffffff;
     --text-color: #333333;
     --meta-color: #666666;
-    --border-color: #e0e0e0;
+    --border-color: #e0e0e000;
     --link-color: #0066cc;
     --code-bg: #f5f5f5;
 }
@@ -13,7 +13,7 @@
         --bg-color: #1a1a1a;
         --text-color: #e0e0e0;
         --meta-color: #a0a0a0;
-        --border-color: #333333;
+        --border-color: #33333300;
         --link-color: #4da6ff;
         --code-bg: #2a2a2a;
     }

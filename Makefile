@@ -21,6 +21,9 @@ clean:
 	docker compose down --rmi all
 	# rm -rf __pycache__/ data email.db ${PROJECT_NAME}.tar
 
+logs:
+	docker compose logs -f
+
 export:
 	docker save -o ${PROJECT_NAME}.tar ${PROJECT_NAME}_fetch_and_generate:latest ${PROJECT_NAME}_serve:latest
 	echo "Docker images saved as ${PROJECT_NAME}.tar"
