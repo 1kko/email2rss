@@ -45,7 +45,17 @@ class RSSRequestHandler(http.server.SimpleHTTPRequestHandler):
         # Route handling
         path_parts = self.path.split("?")[0].strip("/").split("/")
 
-        # Route: /article/{feed}/{guid}
+        # Route: /article (list all articles)
+        if len(path_parts) == 1 and path_parts[0] == "article":
+            self.serve_article_list()
+            return
+
+        # Route: /article/{feed} (list articles from specific feed)
+        if len(path_parts) == 2 and path_parts[0] == "article":
+            self.serve_feed_article_list(path_parts[1])
+            return
+
+        # Route: /article/{feed}/{guid} (view specific article)
         if len(path_parts) >= 3 and path_parts[0] == "article":
             self.serve_article(path_parts[1], path_parts[2])
             return
@@ -148,6 +158,90 @@ class RSSRequestHandler(http.server.SimpleHTTPRequestHandler):
             logging.error(f"Error serving article {feed_name}/{guid}: {e}")
             self.send_error(500, f"Internal server error: {str(e)}")
 
+    def serve_article_list(self):
+        """
+        Serve a list of all articles from all feeds.
+        """
+        try:
+            # Get all emails with metadata
+            articles = db.get_all_emails_with_metadata()
+
+            # Group articles by sender for statistics
+            senders = {}
+            for article in articles:
+                sender = article["sender"]
+                if sender not in senders:
+                    senders[sender] = {
+                        "count": 0,
+                        "latest": article["timestamp"],
+                        "feed_name": self.sanitize_feed_name(sender)
+                    }
+                senders[sender]["count"] += 1
+                if article["timestamp"] > senders[sender]["latest"]:
+                    senders[sender]["latest"] = article["timestamp"]
+
+            # Generate HTML
+            html = self.generate_article_list_html(articles, senders, None)
+
+            # Send response
+            self.send_response(200)
+            self.send_header("Content-type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(html.encode("utf-8"))))
+            self.end_headers()
+            self.wfile.write(html.encode("utf-8"))
+
+        except Exception as e:
+            logging.error(f"Error serving article list: {e}")
+            self.send_error(500, f"Internal server error: {str(e)}")
+
+    def serve_feed_article_list(self, feed_name):
+        """
+        Serve a list of articles from a specific feed.
+
+        Args:
+            feed_name (str): Sanitized feed name (e.g., hello_mrdongnews_com)
+        """
+        try:
+            # Convert sanitized feed name back to email address
+            parts = feed_name.split("_")
+            if len(parts) >= 2:
+                sender_email = parts[0] + "@" + ".".join(parts[1:])
+            else:
+                sender_email = feed_name.replace("_", "@", 1).replace("_", ".")
+
+            # Get articles from this sender
+            articles = db.get_emails_by_sender_with_metadata(sender_email)
+
+            if not articles:
+                self.send_error(404, "Feed not found or no articles available")
+                return
+
+            # Generate HTML
+            html = self.generate_article_list_html(articles, None, sender_email)
+
+            # Send response
+            self.send_response(200)
+            self.send_header("Content-type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(html.encode("utf-8"))))
+            self.end_headers()
+            self.wfile.write(html.encode("utf-8"))
+
+        except Exception as e:
+            logging.error(f"Error serving feed article list {feed_name}: {e}")
+            self.send_error(500, f"Internal server error: {str(e)}")
+
+    def sanitize_feed_name(self, email_address):
+        """
+        Convert email address to sanitized feed name.
+
+        Args:
+            email_address (str): Email address (e.g., hello@mrdongnews.com)
+
+        Returns:
+            str: Sanitized feed name (e.g., hello_mrdongnews_com)
+        """
+        return email_address.replace("@", "_").replace(".", "_")
+
     def serve_static_file(self, filename):
         """
         Serve static assets from the static/ directory.
@@ -221,6 +315,150 @@ class RSSRequestHandler(http.server.SimpleHTTPRequestHandler):
         </div>
     </article>
     <script src="/static/reader.js"></script>
+</body>
+</html>"""
+
+    def generate_article_list_html(self, articles, senders=None, specific_sender=None):
+        """
+        Generate HTML for article listing.
+
+        Args:
+            articles (list): List of article dictionaries with metadata
+            senders (dict): Dictionary of sender statistics (for all feeds view)
+            specific_sender (str): Specific sender email (for single feed view)
+
+        Returns:
+            str: Complete HTML page
+        """
+        # Build page title and header
+        if specific_sender:
+            page_title = f"Articles from {specific_sender}"
+            header_html = f"""
+                <header>
+                    <h1>Articles from {specific_sender}</h1>
+                    <p class="meta">
+                        Total articles: {len(articles)} |
+                        <a href="/article" style="color: var(--link-color);">View all feeds</a>
+                    </p>
+                </header>
+            """
+        else:
+            total_articles = len(articles)
+            total_feeds = len(senders) if senders else 0
+            page_title = "All Articles"
+
+            # Build feed statistics
+            feed_stats_html = ""
+            if senders:
+                feed_stats_html = "<div class='feed-stats'><h2>Feeds</h2><ul class='feed-list'>"
+                for sender, stats in sorted(senders.items(), key=lambda x: x[1]["latest"], reverse=True):
+                    feed_stats_html += f"""
+                        <li>
+                            <a href="/article/{stats['feed_name']}">{sender}</a>
+                            <span class="meta">({stats['count']} articles, last updated: {stats['latest'].strftime('%Y-%m-%d %H:%M')})</span>
+                        </li>
+                    """
+                feed_stats_html += "</ul></div>"
+
+            header_html = f"""
+                <header>
+                    <h1>All Articles</h1>
+                    <p class="meta">Total feeds: {total_feeds} | Total articles: {total_articles}</p>
+                </header>
+                {feed_stats_html}
+            """
+
+        # Build article list
+        articles_html = "<div class='article-list'><h2>Recent Articles</h2><ul class='article-items'>"
+        for article in articles:
+            feed_name = self.sanitize_feed_name(article["sender"])
+            article_url = f"/article/{feed_name}/{article['guid']}"
+
+            articles_html += f"""
+                <li class='article-item'>
+                    <a href="{article_url}" class='article-title'>{article['subject']}</a>
+                    <div class="meta">
+                        From: <a href="/article/{feed_name}">{article['sender']}</a> |
+                        Date: {article['date']}
+                    </div>
+                </li>
+            """
+        articles_html += "</ul></div>"
+
+        return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{page_title}</title>
+    <link rel="stylesheet" href="/static/reader.css">
+    <style>
+        .feed-stats {{
+            margin: 2rem 0;
+            padding: 1.5rem;
+            background-color: var(--code-bg);
+            border-radius: 8px;
+        }}
+        .feed-stats h2 {{
+            margin-bottom: 1rem;
+            font-size: 1.5rem;
+        }}
+        .feed-list {{
+            list-style: none;
+            padding: 0;
+        }}
+        .feed-list li {{
+            padding: 0.75rem 0;
+            border-bottom: 1px solid var(--border-color);
+        }}
+        .feed-list li:last-child {{
+            border-bottom: none;
+        }}
+        .feed-list a {{
+            color: var(--link-color);
+            text-decoration: none;
+            font-weight: 600;
+            font-size: 1.1rem;
+        }}
+        .feed-list a:hover {{
+            text-decoration: underline;
+        }}
+        .article-list {{
+            margin: 2rem 0;
+        }}
+        .article-list h2 {{
+            margin-bottom: 1rem;
+            font-size: 1.5rem;
+        }}
+        .article-items {{
+            list-style: none;
+            padding: 0;
+        }}
+        .article-item {{
+            padding: 1rem 0;
+            border-bottom: 1px solid var(--border-color);
+        }}
+        .article-item:last-child {{
+            border-bottom: none;
+        }}
+        .article-title {{
+            color: var(--link-color);
+            text-decoration: none;
+            font-weight: 600;
+            font-size: 1.2rem;
+            display: block;
+            margin-bottom: 0.5rem;
+        }}
+        .article-title:hover {{
+            text-decoration: underline;
+        }}
+    </style>
+</head>
+<body>
+    <article>
+        {header_html}
+        {articles_html}
+    </article>
 </body>
 </html>"""
 

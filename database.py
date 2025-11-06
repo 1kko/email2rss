@@ -185,3 +185,96 @@ def get_email_by_guid(sender: str, guid: str):
                 continue
 
         return None
+
+
+def get_all_emails_with_metadata():
+    """
+    Get all emails from the database with parsed metadata.
+
+    Returns:
+        list: A list of dictionaries containing email metadata:
+            - sender: sender email address
+            - subject: email subject
+            - date: email date
+            - guid: calculated MD5 GUID
+            - timestamp: database timestamp
+    """
+    max_item_per_feed = config.get("max_item_per_feed")
+
+    with Session() as session:
+        emails = (
+            session.query(Email)
+            .order_by(Email.timestamp.desc())
+            .limit(max_item_per_feed * 10)  # Limit to reasonable number
+            .all()
+        )
+
+        result = []
+        for email_record in emails:
+            try:
+                msg = email.message_from_bytes(email_record.content)
+                subject = email.header.make_header(email.header.decode_header(msg["subject"]))
+                subject_text = str(subject)
+                date_text = msg["date"]
+
+                # Calculate GUID
+                unique_string = msg["subject"] + msg["date"] + msg["from"]
+                guid = hashlib.md5(unique_string.encode()).hexdigest()
+
+                result.append({
+                    "sender": email_record.sender,
+                    "subject": subject_text,
+                    "date": date_text,
+                    "guid": guid,
+                    "timestamp": email_record.timestamp,
+                })
+            except Exception:
+                continue
+
+        return result
+
+
+def get_emails_by_sender_with_metadata(sender: str):
+    """
+    Get all emails from a specific sender with parsed metadata.
+
+    Args:
+        sender (str): The sender email address
+
+    Returns:
+        list: A list of dictionaries containing email metadata
+    """
+    max_item_per_feed = config.get("max_item_per_feed")
+
+    with Session() as session:
+        emails = (
+            session.query(Email)
+            .filter_by(sender=sender)
+            .order_by(Email.timestamp.desc())
+            .limit(max_item_per_feed)
+            .all()
+        )
+
+        result = []
+        for email_record in emails:
+            try:
+                msg = email.message_from_bytes(email_record.content)
+                subject = email.header.make_header(email.header.decode_header(msg["subject"]))
+                subject_text = str(subject)
+                date_text = msg["date"]
+
+                # Calculate GUID
+                unique_string = msg["subject"] + msg["date"] + msg["from"]
+                guid = hashlib.md5(unique_string.encode()).hexdigest()
+
+                result.append({
+                    "sender": email_record.sender,
+                    "subject": subject_text,
+                    "date": date_text,
+                    "guid": guid,
+                    "timestamp": email_record.timestamp,
+                })
+            except Exception:
+                continue
+
+        return result
