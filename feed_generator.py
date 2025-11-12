@@ -64,7 +64,11 @@ def generate_rss(sender, messages):
 
         channel_data = {"name": sender, "pubDate": None}
 
-        for mail_item in messages:
+        # Convert messages to list and reverse to get newest first in RSS
+        messages_list = list(messages)
+        messages_list.reverse()
+
+        for mail_item in messages_list:
             msg = email.message_from_bytes(mail_item.content)
             feed_entry = channel.add_entry()
 
