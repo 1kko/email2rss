@@ -6,12 +6,12 @@ import datetime
 import email
 import hashlib
 
-from sqlalchemy import create_engine, Column, Integer, String, Text, DateTime, BLOB
+from sqlalchemy import create_engine, Column, Integer, String, Text, DateTime, BLOB, Index, text
 from sqlalchemy.pool import NullPool
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.ext.declarative import declarative_base
 
-from common import config
+from common import config, logging
 
 Base = declarative_base()
 
@@ -32,16 +32,61 @@ class Email(Base):
 
     id = Column(Integer, primary_key=True)
     receiver = Column(String)
-    sender = Column(String)
-    email_id = Column(Integer)
+    sender = Column(String, index=True)
+    email_id = Column(Integer, unique=True, index=True)
     subject = Column(Text)
     content = Column(BLOB)
-    timestamp = Column(DateTime, default=datetime.datetime.utcnow)
+    timestamp = Column(DateTime, default=datetime.datetime.utcnow, index=True)
+
+    __table_args__ = (
+        Index('idx_sender_timestamp', 'sender', 'timestamp'),
+    )
 
 
 data_dir = config.get("data_dir", "data")
 engine = create_engine(f"sqlite:///{data_dir}/emails.db", poolclass=NullPool)
-Base.metadata.create_all(engine)
+
+
+def migrate_database():
+    """
+    Migrate existing database to add indexes if they don't exist.
+    This function is safe to run on both new and existing databases.
+    """
+    logging.info("Checking database schema and indexes...")
+
+    # Create tables if they don't exist
+    Base.metadata.create_all(engine)
+
+    # Check and create indexes for existing databases
+    with engine.connect() as conn:
+        # Get list of existing indexes
+        result = conn.execute(
+            text("SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='emails'")
+        )
+        existing_indexes = {row[0] for row in result}
+
+        # Define required indexes
+        required_indexes = {
+            'ix_emails_sender': 'CREATE INDEX IF NOT EXISTS ix_emails_sender ON emails (sender)',
+            'ix_emails_email_id': 'CREATE UNIQUE INDEX IF NOT EXISTS ix_emails_email_id ON emails (email_id)',
+            'ix_emails_timestamp': 'CREATE INDEX IF NOT EXISTS ix_emails_timestamp ON emails (timestamp)',
+            'idx_sender_timestamp': 'CREATE INDEX IF NOT EXISTS idx_sender_timestamp ON emails (sender, timestamp)',
+        }
+
+        # Create missing indexes
+        for index_name, create_sql in required_indexes.items():
+            if index_name not in existing_indexes:
+                logging.info(f"Creating index: {index_name}")
+                conn.execute(text(create_sql))
+                conn.commit()
+            else:
+                logging.debug(f"Index already exists: {index_name}")
+
+        logging.info("Database migration completed successfully")
+
+
+# Run migration on startup
+migrate_database()
 
 Session = sessionmaker(bind=engine)
 
@@ -103,7 +148,7 @@ def get_email(sender: str) -> list:
         emails = (
             session.query(Email)
             .filter_by(sender=sender)
-            .order_by(Email.timestamp.asc())
+            .order_by(Email.timestamp.desc())
             .limit(max_item_per_feed)
         )
         return emails
