@@ -102,3 +102,22 @@ def cleanse_content(content):
     # This pattern excludes ASCII values 9 (tab), 10 (newline), and 13 (carriage return), which are acceptable in XML.
     invalid_xml_chars = re.compile(r"[\x00-\x08\x0B\x0C\x0E-\x1F]")
     return invalid_xml_chars.sub("", content)
+
+
+def sanitize_html(content):
+    """Sanitize HTML content to prevent XSS while preserving safe formatting."""
+    if not content:
+        return content
+    # Remove script tags and content
+    content = re.sub(r'<script[^>]*>.*?</script>', '', content, flags=re.DOTALL | re.IGNORECASE)
+    # Remove style tags and content
+    content = re.sub(r'<style[^>]*>.*?</style>', '', content, flags=re.DOTALL | re.IGNORECASE)
+    # Remove dangerous tags (keep content between them)
+    for tag in ['iframe', 'object', 'embed', 'form', 'input', 'base', 'meta', 'link']:
+        content = re.sub(rf'</?{tag}[^>]*>', '', content, flags=re.IGNORECASE)
+    # Remove event handlers
+    content = re.sub(r'\s+on\w+\s*=\s*["\'][^"\']*["\']', '', content, flags=re.IGNORECASE)
+    content = re.sub(r'\s+on\w+\s*=\s*\S+', '', content, flags=re.IGNORECASE)
+    # Remove javascript: URLs
+    content = re.sub(r'(href|src|action)\s*=\s*["\']?\s*javascript:', r'\1="', content, flags=re.IGNORECASE)
+    return content

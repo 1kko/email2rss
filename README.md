@@ -29,6 +29,7 @@ refresh_seconds=300
 data_dir=data
 max_item_per_feed=100
 server_baseurl=http://localhost:8000
+bind_address=0.0.0.0
 
 # Internal RSS Reader (optional)
 # Set to 'true' to enable internal article viewer
@@ -49,6 +50,7 @@ enable_internal_reader=false
 | `data_dir` | Directory for database and RSS files | `data` |
 | `max_item_per_feed` | Maximum items per RSS feed | `100` |
 | `server_baseurl` | Base URL for RSS feed links | Optional |
+| `bind_address` | Address the HTTP server binds to | `127.0.0.1` |
 | `enable_internal_reader` | Enable internal article viewer | `false` |
 
 ## Internal RSS Reader
