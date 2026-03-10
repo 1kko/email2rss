@@ -4,6 +4,7 @@ A Simple python web server which serves RSS feeds and provides an internal reade
 """
 from __future__ import annotations
 
+import html as html_module
 import os
 import functools
 import http.server
@@ -12,11 +13,11 @@ import email
 import email.header
 import mimetypes
 from pathlib import Path
-from urllib.parse import unquote
+from urllib.parse import unquote, urlparse
 
 import database as db
 from common import logging, config
-from util import cleanse_content
+from util import cleanse_content, sanitize_html
 
 
 class RSSRequestHandler(http.server.SimpleHTTPRequestHandler):
@@ -34,12 +35,14 @@ class RSSRequestHandler(http.server.SimpleHTTPRequestHandler):
         Serve a GET request with routing support.
         """
         # Block database files
-        if self.path.endswith(".db"):
+        parsed_path = urlparse(self.path).path
+        if parsed_path.endswith(".db"):
             self.send_error(404, "File not found")
             return
 
+        safe_path = self.path.replace('\n', '').replace('\r', '')
         logging.info(
-            f"Serving ip={self.client_address[0]} headers={self.headers} {self.path}"
+            f"Serving ip={self.client_address[0]} path={safe_path}"
         )
 
         # Route handling
@@ -144,6 +147,9 @@ class RSSRequestHandler(http.server.SimpleHTTPRequestHandler):
             if not html_content and text_content:
                 content = f"<pre>{content}</pre>"
 
+            # Sanitize HTML content to prevent XSS
+            content = sanitize_html(content)
+
             # Generate HTML response
             html = self.generate_article_html(subject_text, sender_email, date_text, content)
 
@@ -151,12 +157,13 @@ class RSSRequestHandler(http.server.SimpleHTTPRequestHandler):
             self.send_response(200)
             self.send_header("Content-type", "text/html; charset=utf-8")
             self.send_header("Content-Length", str(len(html.encode("utf-8"))))
+            self.send_security_headers()
             self.end_headers()
             self.wfile.write(html.encode("utf-8"))
 
         except Exception as e:
             logging.error(f"Error serving article {feed_name}/{guid}: {e}")
-            self.send_error(500, f"Internal server error: {str(e)}")
+            self.send_error(500, "Internal server error")
 
     def serve_article_list(self):
         """
@@ -187,12 +194,13 @@ class RSSRequestHandler(http.server.SimpleHTTPRequestHandler):
             self.send_response(200)
             self.send_header("Content-type", "text/html; charset=utf-8")
             self.send_header("Content-Length", str(len(html.encode("utf-8"))))
+            self.send_security_headers()
             self.end_headers()
             self.wfile.write(html.encode("utf-8"))
 
         except Exception as e:
             logging.error(f"Error serving article list: {e}")
-            self.send_error(500, f"Internal server error: {str(e)}")
+            self.send_error(500, "Internal server error")
 
     def serve_feed_article_list(self, feed_name):
         """
@@ -223,12 +231,13 @@ class RSSRequestHandler(http.server.SimpleHTTPRequestHandler):
             self.send_response(200)
             self.send_header("Content-type", "text/html; charset=utf-8")
             self.send_header("Content-Length", str(len(html.encode("utf-8"))))
+            self.send_security_headers()
             self.end_headers()
             self.wfile.write(html.encode("utf-8"))
 
         except Exception as e:
             logging.error(f"Error serving feed article list {feed_name}: {e}")
-            self.send_error(500, f"Internal server error: {str(e)}")
+            self.send_error(500, "Internal server error")
 
     def sanitize_feed_name(self, email_address):
         """
@@ -241,6 +250,12 @@ class RSSRequestHandler(http.server.SimpleHTTPRequestHandler):
             str: Sanitized feed name (e.g., hello_mrdongnews_com)
         """
         return email_address.replace("@", "_").replace(".", "_")
+
+    def send_security_headers(self):
+        """Send security-related HTTP headers."""
+        self.send_header("Content-Security-Policy", "default-src 'self'; img-src * data:; style-src 'self' 'unsafe-inline'")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("X-Frame-Options", "DENY")
 
     def serve_static_file(self, filename):
         """
@@ -276,12 +291,13 @@ class RSSRequestHandler(http.server.SimpleHTTPRequestHandler):
             self.send_response(200)
             self.send_header("Content-type", mime_type)
             self.send_header("Content-Length", str(len(content)))
+            self.send_security_headers()
             self.end_headers()
             self.wfile.write(content)
 
         except Exception as e:
             logging.error(f"Error serving static file {filename}: {e}")
-            self.send_error(500, f"Internal server error: {str(e)}")
+            self.send_error(500, "Internal server error")
 
     def generate_article_html(self, subject, sender, date, content):
         """
@@ -296,19 +312,22 @@ class RSSRequestHandler(http.server.SimpleHTTPRequestHandler):
         Returns:
             str: Complete HTML page
         """
+        escaped_subject = html_module.escape(subject)
+        escaped_sender = html_module.escape(sender)
+        escaped_date = html_module.escape(date or '')
         return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{subject}</title>
+    <title>{escaped_subject}</title>
     <link rel="stylesheet" href="/static/reader.css">
 </head>
 <body>
     <article>
         <header>
-            <h1>{subject}</h1>
-            <p class="meta">From: {sender} | Date: {date}</p>
+            <h1>{escaped_subject}</h1>
+            <p class="meta">From: {escaped_sender} | Date: {escaped_date}</p>
         </header>
         <div class="content">
             {content}
@@ -332,10 +351,11 @@ class RSSRequestHandler(http.server.SimpleHTTPRequestHandler):
         """
         # Build page title and header
         if specific_sender:
-            page_title = f"Articles from {specific_sender}"
+            escaped_sender = html_module.escape(specific_sender)
+            page_title = f"Articles from {escaped_sender}"
             header_html = f"""
                 <header>
-                    <h1>Articles from {specific_sender}</h1>
+                    <h1>Articles from {escaped_sender}</h1>
                     <p class="meta">
                         Total articles: {len(articles)} |
                         <a href="/article" style="color: var(--link-color);">View all feeds</a>
@@ -354,7 +374,7 @@ class RSSRequestHandler(http.server.SimpleHTTPRequestHandler):
                 for sender, stats in sorted(senders.items(), key=lambda x: x[1]["latest"], reverse=True):
                     feed_stats_html += f"""
                         <li>
-                            <a href="/article/{stats['feed_name']}">{sender}</a>
+                            <a href="/article/{stats['feed_name']}">{html_module.escape(sender)}</a>
                             <span class="meta">({stats['count']} articles, last updated: {stats['latest'].strftime('%Y-%m-%d %H:%M')})</span>
                         </li>
                     """
@@ -376,10 +396,10 @@ class RSSRequestHandler(http.server.SimpleHTTPRequestHandler):
 
             articles_html += f"""
                 <li class='article-item'>
-                    <a href="{article_url}" class='article-title'>{article['subject']}</a>
+                    <a href="{article_url}" class='article-title'>{html_module.escape(article['subject'])}</a>
                     <div class="meta">
-                        From: <a href="/article/{feed_name}">{article['sender']}</a> |
-                        Date: {article['date']}
+                        From: <a href="/article/{feed_name}">{html_module.escape(article['sender'])}</a> |
+                        Date: {html_module.escape(article['date'] or '')}
                     </div>
                 </li>
             """
@@ -491,7 +511,8 @@ def run(
                          Defaults to "data/feed".
         port (int): The port number on which to run the server. Defaults to 8000.
     """
-    server_address = ("", port)
+    bind_address = config.get("bind_address", "127.0.0.1")
+    server_address = (bind_address, port)
 
     # Create a partial function that initializes the handler with the directory
     handler = functools.partial(handler_class, directory=directory)
@@ -501,10 +522,11 @@ def run(
     # If certfile and keyfile are provided, run the server with SSL
     if certfile and keyfile:
         context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        context.minimum_version = ssl.TLSVersion.TLSv1_2
         context.load_cert_chain(certfile, keyfile)
         httpd.socket = context.wrap_socket(httpd.socket, server_side=True)
 
-    logging.info(f"Serving {directory}/ to HTTP http://0.0.0.0:{port}/")
+    logging.info(f"Serving {directory}/ to HTTP http://{bind_address}:{port}/")
     httpd.serve_forever()
 
 

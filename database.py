@@ -6,7 +6,7 @@ import datetime
 import email
 import hashlib
 
-from sqlalchemy import create_engine, Column, Integer, String, Text, DateTime, BLOB, Index, text
+from sqlalchemy import create_engine, event, Column, Integer, String, Text, DateTime, BLOB, Index, text
 from sqlalchemy.pool import NullPool
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.ext.declarative import declarative_base
@@ -45,6 +45,13 @@ class Email(Base):
 
 data_dir = config.get("data_dir", "data")
 engine = create_engine(f"sqlite:///{data_dir}/emails.db", poolclass=NullPool)
+
+
+@event.listens_for(engine, "connect")
+def set_sqlite_pragma(dbapi_connection, connection_record):
+    cursor = dbapi_connection.cursor()
+    cursor.execute("PRAGMA journal_mode=WAL")
+    cursor.close()
 
 
 def migrate_database():
