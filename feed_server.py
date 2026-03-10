@@ -12,7 +12,7 @@ import email
 import email.header
 import mimetypes
 from pathlib import Path
-from urllib.parse import unquote
+from urllib.parse import unquote, urlparse
 
 import database as db
 from common import logging, config
@@ -34,12 +34,14 @@ class RSSRequestHandler(http.server.SimpleHTTPRequestHandler):
         Serve a GET request with routing support.
         """
         # Block database files
-        if self.path.endswith(".db"):
+        parsed_path = urlparse(self.path).path
+        if parsed_path.endswith(".db"):
             self.send_error(404, "File not found")
             return
 
+        safe_path = self.path.replace('\n', '').replace('\r', '')
         logging.info(
-            f"Serving ip={self.client_address[0]} headers={self.headers} {self.path}"
+            f"Serving ip={self.client_address[0]} path={safe_path}"
         )
 
         # Route handling
@@ -156,7 +158,7 @@ class RSSRequestHandler(http.server.SimpleHTTPRequestHandler):
 
         except Exception as e:
             logging.error(f"Error serving article {feed_name}/{guid}: {e}")
-            self.send_error(500, f"Internal server error: {str(e)}")
+            self.send_error(500, "Internal server error")
 
     def serve_article_list(self):
         """
@@ -192,7 +194,7 @@ class RSSRequestHandler(http.server.SimpleHTTPRequestHandler):
 
         except Exception as e:
             logging.error(f"Error serving article list: {e}")
-            self.send_error(500, f"Internal server error: {str(e)}")
+            self.send_error(500, "Internal server error")
 
     def serve_feed_article_list(self, feed_name):
         """
@@ -228,7 +230,7 @@ class RSSRequestHandler(http.server.SimpleHTTPRequestHandler):
 
         except Exception as e:
             logging.error(f"Error serving feed article list {feed_name}: {e}")
-            self.send_error(500, f"Internal server error: {str(e)}")
+            self.send_error(500, "Internal server error")
 
     def sanitize_feed_name(self, email_address):
         """
@@ -281,7 +283,7 @@ class RSSRequestHandler(http.server.SimpleHTTPRequestHandler):
 
         except Exception as e:
             logging.error(f"Error serving static file {filename}: {e}")
-            self.send_error(500, f"Internal server error: {str(e)}")
+            self.send_error(500, "Internal server error")
 
     def generate_article_html(self, subject, sender, date, content):
         """
@@ -491,7 +493,8 @@ def run(
                          Defaults to "data/feed".
         port (int): The port number on which to run the server. Defaults to 8000.
     """
-    server_address = ("", port)
+    bind_address = config.get("bind_address", "127.0.0.1")
+    server_address = (bind_address, port)
 
     # Create a partial function that initializes the handler with the directory
     handler = functools.partial(handler_class, directory=directory)
@@ -501,10 +504,11 @@ def run(
     # If certfile and keyfile are provided, run the server with SSL
     if certfile and keyfile:
         context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        context.minimum_version = ssl.TLSVersion.TLSv1_2
         context.load_cert_chain(certfile, keyfile)
         httpd.socket = context.wrap_socket(httpd.socket, server_side=True)
 
-    logging.info(f"Serving {directory}/ to HTTP http://0.0.0.0:{port}/")
+    logging.info(f"Serving {directory}/ to HTTP http://{bind_address}:{port}/")
     httpd.serve_forever()
 
 
