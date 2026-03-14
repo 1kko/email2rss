@@ -12,7 +12,7 @@ from __future__ import annotations
 import email
 import email.header
 import hashlib
-import xml.etree.ElementTree as ET
+import defusedxml.ElementTree as ET
 import datetime
 from pathlib import Path
 from urllib.parse import urljoin
@@ -78,7 +78,7 @@ def generate_rss(sender, messages):
 
             # Generate unique GUID (needed for internal reader)
             unique_string = msg["subject"] + msg["date"] + msg["from"]
-            guid = hashlib.md5(unique_string.encode()).hexdigest()
+            guid = hashlib.md5(unique_string.encode(), usedforsecurity=False).hexdigest()
             feed_entry.id(guid)
 
             # Generate entry link based on internal reader setting

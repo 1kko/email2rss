@@ -13,7 +13,7 @@ import email
 import email.header
 import mimetypes
 from pathlib import Path
-from urllib.parse import unquote, urlparse
+from urllib.parse import urlparse
 
 import database as db
 from common import logging, config
@@ -128,6 +128,7 @@ class RSSRequestHandler(http.server.SimpleHTTPRequestHandler):
                                 elif content_type == "text/plain" and html_content is None:
                                     text_content = cleanse_content(payload_decoded)
                             except Exception:
+                                logging.debug("Skipping unparseable MIME part")
                                 continue
             else:
                 charset = msg.get_content_charset() or "utf-8"
@@ -253,7 +254,8 @@ class RSSRequestHandler(http.server.SimpleHTTPRequestHandler):
 
     def send_security_headers(self):
         """Send security-related HTTP headers."""
-        self.send_header("Content-Security-Policy", "default-src 'self'; img-src * data:; style-src 'self' 'unsafe-inline'")
+        csp = "default-src 'self'; img-src * data:; style-src 'self' 'unsafe-inline'"
+        self.send_header("Content-Security-Policy", csp)
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("X-Frame-Options", "DENY")
 
@@ -372,10 +374,11 @@ class RSSRequestHandler(http.server.SimpleHTTPRequestHandler):
             if senders:
                 feed_stats_html = "<div class='feed-stats'><h2>Feeds</h2><ul class='feed-list'>"
                 for sender, stats in sorted(senders.items(), key=lambda x: x[1]["latest"], reverse=True):
+                    last_updated = stats['latest'].strftime('%Y-%m-%d %H:%M')
                     feed_stats_html += f"""
                         <li>
                             <a href="/article/{stats['feed_name']}">{html_module.escape(sender)}</a>
-                            <span class="meta">({stats['count']} articles, last updated: {stats['latest'].strftime('%Y-%m-%d %H:%M')})</span>
+                            <span class="meta">({stats['count']} articles, last updated: {last_updated})</span>
                         </li>
                     """
                 feed_stats_html += "</ul></div>"

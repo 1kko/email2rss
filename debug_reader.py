@@ -87,7 +87,7 @@ def debug_info():
         email_record = db.get_email_by_guid(target_sender, target_guid)
 
         if email_record:
-            print(f"  ✅ Email found!")
+            print("  ✅ Email found!")
             msg = email.message_from_bytes(email_record.content)
             subject = email.header.make_header(email.header.decode_header(msg["subject"]))
             print(f"    Subject: {subject}")
