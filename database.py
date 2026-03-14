@@ -226,14 +226,14 @@ def get_email_by_guid(sender: str, guid: str):
 
                 # Calculate GUID using the same logic as feed_generator.py
                 unique_string = msg["subject"] + msg["date"] + msg["from"]
-                calculated_guid = hashlib.md5(unique_string.encode()).hexdigest()
+                calculated_guid = hashlib.md5(unique_string.encode(), usedforsecurity=False).hexdigest()
 
                 # Check if this is the email we're looking for
                 if calculated_guid == guid:
                     return email_record
 
-            except Exception as e:
-                # Skip emails that fail to parse
+            except Exception:
+                logging.debug("Skipping unparseable email id=%s", email_record.id)
                 continue
 
         return None
@@ -271,7 +271,7 @@ def get_all_emails_with_metadata():
 
                 # Calculate GUID
                 unique_string = msg["subject"] + msg["date"] + msg["from"]
-                guid = hashlib.md5(unique_string.encode()).hexdigest()
+                guid = hashlib.md5(unique_string.encode(), usedforsecurity=False).hexdigest()
 
                 result.append({
                     "sender": email_record.sender,
@@ -281,6 +281,7 @@ def get_all_emails_with_metadata():
                     "timestamp": email_record.timestamp,
                 })
             except Exception:
+                logging.debug("Skipping unparseable email id=%s", email_record.id)
                 continue
 
         return result
@@ -317,7 +318,7 @@ def get_emails_by_sender_with_metadata(sender: str):
 
                 # Calculate GUID
                 unique_string = msg["subject"] + msg["date"] + msg["from"]
-                guid = hashlib.md5(unique_string.encode()).hexdigest()
+                guid = hashlib.md5(unique_string.encode(), usedforsecurity=False).hexdigest()
 
                 result.append({
                     "sender": email_record.sender,
@@ -327,6 +328,7 @@ def get_emails_by_sender_with_metadata(sender: str):
                     "timestamp": email_record.timestamp,
                 })
             except Exception:
+                logging.debug("Skipping unparseable email id=%s", email_record.id)
                 continue
 
         return result
