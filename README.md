@@ -11,7 +11,8 @@ This project fetches emails from a specified mailbox and generates an RSS feed f
 - Saves each RSS feed to a file
 - Handles errors and logs them
 - **Internal RSS Reader** - Optional web-based reader to view full email content directly
-- Serves RSS feeds via built-in HTTP server
+- Serves RSS feeds via a Flask/gunicorn HTTP server
+- **Optional OpenTelemetry** - Export traces, metrics, and logs to any OTLP collector (SigNoz, Grafana Tempo, etc.)
 
 
 
@@ -91,6 +92,58 @@ After enabling, regenerate your RSS feeds for the changes to take effect.
 ### URL Structure
 
 Articles are accessed via: `http://your-server:8000/article/{feed}/{guid}`
+
+## Operational Endpoints
+
+Two lightweight JSON endpoints ship out of the box for health checks and ad-hoc inspection:
+
+- `GET /health` → `{"status": "ok"}` — suitable for uptime probes and Coolify/Kubernetes health checks
+- `GET /stats` → total emails, sender count, full sender list
+
+## OpenTelemetry (Optional)
+
+The server and fetcher containers support exporting traces, metrics, and structured logs to any OTLP-compatible collector. This is **off by default** — set `OTEL_EXPORTER_OTLP_ENDPOINT` to enable.
+
+### Enabling
+
+Set these environment variables (via `.env`, `docker-compose.override.yaml`, or your platform's secret manager):
+
+```env
+# Required to enable (leave blank to disable OTel entirely)
+OTEL_EXPORTER_OTLP_ENDPOINT=https://your-otel-collector.example.com
+
+# Optional overrides (defaults shown)
+OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
+OTEL_TRACES_EXPORTER=otlp
+OTEL_METRICS_EXPORTER=otlp
+OTEL_LOGS_EXPORTER=otlp
+OTEL_PYTHON_LOG_CORRELATION=true
+OTEL_RESOURCE_ATTRIBUTES=deployment.environment=production,service.version=0.2.0
+```
+
+When `OTEL_EXPORTER_OTLP_ENDPOINT` is unset or empty, the entrypoint skips the `opentelemetry-instrument` wrapper entirely — no startup cost, no exporter threads, no accidental data shipping.
+
+### What gets instrumented
+
+Two service identities are reported:
+
+- `email2rss-server` — Flask requests (auto), SQLAlchemy queries (auto), `/article`/`/stats`/feed-file spans
+- `email2rss-fetcher` — IMAP fetch cycle spans, per-sender `emails.received` counter, fetch/generation duration histograms, cycle counters labeled `{status=success|error}`
+
+Custom metrics:
+
+| Name | Type | Labels | Source |
+|------|------|--------|--------|
+| `email2rss.fetch.duration` | histogram (s) | — | fetcher cycle |
+| `email2rss.fetch.cycles` | counter | `status` | fetcher cycle |
+| `email2rss.emails.received` | counter | `sender` | per persisted email |
+| `email2rss.feed.generation.duration` | histogram (s) | — | generator cycle |
+| `email2rss.feed.generation.cycles` | counter | `status` | generator cycle |
+| `email2rss.feeds.generated` | counter | `status` | per sender feed |
+
+### Collector compatibility
+
+Any OTLP/HTTP collector works. Tested against [SigNoz](https://signoz.io/) self-hosted. For gRPC collectors set `OTEL_EXPORTER_OTLP_PROTOCOL=grpc` and point at a gRPC endpoint.
 
 Example: `http://localhost:8000/article/hello_tailscale_com/4e939412d854ceb79b21f011d93e2ec7`
 

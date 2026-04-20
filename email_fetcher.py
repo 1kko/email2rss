@@ -9,14 +9,34 @@ and saves to a database.
 from __future__ import annotations
 
 import datetime
+import time
 
 import email
 import email.header
 import imaplib
 
+from opentelemetry import metrics, trace
+
 import database as db
 from common import logging, config
 from util import extract_email_address
+
+_tracer = trace.get_tracer(__name__)
+_meter = metrics.get_meter(__name__)
+
+_fetch_duration = _meter.create_histogram(
+    "email2rss.fetch.duration",
+    unit="s",
+    description="IMAP fetch cycle duration",
+)
+_fetch_cycles = _meter.create_counter(
+    "email2rss.fetch.cycles",
+    description="Count of fetch cycles by status",
+)
+_emails_received = _meter.create_counter(
+    "email2rss.emails.received",
+    description="Emails persisted per sender",
+)
 
 
 def connect_to_gmail(imap_server, username, password, mailbox="INBOX"):
@@ -90,6 +110,7 @@ def fetch_emails(mail, since=10):
                 content=data[0][1],
                 timestamp=article_date,
             )
+            _emails_received.add(1, {"sender": sender})
 
             if sender not in emails:
                 emails[sender] = []
@@ -125,20 +146,34 @@ def main():
     if db.get_entry_count() == 0:
         since = 30
 
-    try:
-        service = connect_to_gmail(imap_server, userid, userpw, mailbox)
-        before_id = db.get_last_email_id()
-        _ = fetch_emails(service, since=since)
-        after_id = db.get_last_email_id()
+    started = time.perf_counter()
+    with _tracer.start_as_current_span("email_fetcher.cycle") as span:
+        span.set_attribute("since_days", since)
+        try:
+            service = connect_to_gmail(imap_server, userid, userpw, mailbox)
+            before_id = db.get_last_email_id()
+            _ = fetch_emails(service, since=since)
+            after_id = db.get_last_email_id()
 
-        # don't build if the email id is same.
-        # if last email id is same, no need to build the rss feed.
-        if before_id == after_id:
-            logging.info("No new emails found. Skipping RSS feed generation.")
+            new_count = max(0, after_id - before_id)
+            span.set_attribute("new_emails", new_count)
+
+            # don't build if the email id is same.
+            # if last email id is same, no need to build the rss feed.
+            if before_id == after_id:
+                logging.info("No new emails found. Skipping RSS feed generation.")
+                return
+
+        except Exception as e:
+            span.record_exception(e)
+            span.set_status(trace.StatusCode.ERROR, str(e))
+            _fetch_cycles.add(1, {"status": "error"})
+            logging.error(f"An error occurred during execution: {e}")
             return
+        finally:
+            _fetch_duration.record(time.perf_counter() - started)
 
-    except Exception as e:
-        logging.error(f"An error occurred during execution: {e}")
+        _fetch_cycles.add(1, {"status": "success"})
 
 
 # Main Execution

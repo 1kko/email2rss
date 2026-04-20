@@ -12,11 +12,13 @@ from __future__ import annotations
 import email
 import email.header
 import hashlib
+import time
 import defusedxml.ElementTree as ET
 import datetime
 from pathlib import Path
 from urllib.parse import urljoin
 from feedgen.feed import FeedGenerator
+from opentelemetry import metrics, trace
 
 import database as db
 from common import config, logging
@@ -26,6 +28,23 @@ from util import (
     extract_email_address,
     extract_name_from_email,
     utf8_decoder,
+)
+
+_tracer = trace.get_tracer(__name__)
+_meter = metrics.get_meter(__name__)
+
+_generation_duration = _meter.create_histogram(
+    "email2rss.feed.generation.duration",
+    unit="s",
+    description="Feed generation cycle duration",
+)
+_generation_cycles = _meter.create_counter(
+    "email2rss.feed.generation.cycles",
+    description="Count of feed generation cycles by status",
+)
+_feeds_generated = _meter.create_counter(
+    "email2rss.feeds.generated",
+    description="Individual sender feeds generated",
 )
 
 
@@ -314,19 +333,35 @@ def main():
 
     rss_files = []
 
-    for sender in db.get_senders():
-        messages = db.get_email(sender)
-        logging.info(f"{sender} found entries={messages.count()}")
-        try:
-            rss_feed = generate_rss(sender, messages)
-            feed_file_path = save_feed(sender, rss_feed, save_path=data_feed_dir)
-            rss_files.append(feed_file_path)
-        except Exception as e:
-            logging.error(f"Skipping {sender} due to error: {e}")
-            continue
+    started = time.perf_counter()
+    with _tracer.start_as_current_span("feed_generator.cycle") as span:
+        senders = db.get_senders()
+        span.set_attribute("sender_count", len(senders))
 
-    # aggregate all the feeds into a single OPML file
-    create_opml_from_files(rss_files, save_path=data_feed_dir)
+        try:
+            for sender in senders:
+                messages = db.get_email(sender)
+                logging.info(f"{sender} found entries={messages.count()}")
+                try:
+                    rss_feed = generate_rss(sender, messages)
+                    feed_file_path = save_feed(sender, rss_feed, save_path=data_feed_dir)
+                    rss_files.append(feed_file_path)
+                    _feeds_generated.add(1, {"status": "success"})
+                except Exception as e:
+                    _feeds_generated.add(1, {"status": "error"})
+                    logging.error(f"Skipping {sender} due to error: {e}")
+                    continue
+
+            # aggregate all the feeds into a single OPML file
+            create_opml_from_files(rss_files, save_path=data_feed_dir)
+            _generation_cycles.add(1, {"status": "success"})
+        except Exception as e:
+            span.record_exception(e)
+            span.set_status(trace.StatusCode.ERROR, str(e))
+            _generation_cycles.add(1, {"status": "error"})
+            raise
+        finally:
+            _generation_duration.record(time.perf_counter() - started)
 
 
 # Main Execution
