@@ -38,7 +38,8 @@ def test_get_email_returns_newest_first(db_session):
     insert_email(db_session, email_id=2, timestamp=datetime.datetime(2026, 4, 12))
     insert_email(db_session, email_id=3, timestamp=datetime.datetime(2026, 4, 11))
 
-    rows = list(db.get_email("sender@example.com"))
+    rows = db.get_email("sender@example.com")
+    assert isinstance(rows, list)  # materialized; callers can call len()/iterate freely
     timestamps = [r.timestamp for r in rows]
     assert timestamps == sorted(timestamps, reverse=True)
 
@@ -49,7 +50,7 @@ def test_get_email_respects_max_item_per_feed(db_session, monkeypatch):
     for i in range(5):
         insert_email(db_session, email_id=i, timestamp=datetime.datetime(2026, 4, 10 + i))
 
-    rows = list(db.get_email("sender@example.com"))
+    rows = db.get_email("sender@example.com")
     assert len(rows) == 2
 
 
