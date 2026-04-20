@@ -8,8 +8,12 @@ config at import time via `load_dotenv()` and `os.getenv()`.
 # ruff: noqa: E402  — intentional: env vars must be set before project imports
 from __future__ import annotations
 
+import datetime
+import email as email_mod
 import os
 import tempfile
+import atexit
+import shutil
 from pathlib import Path
 
 # ---------------------------------------------------------------------------
@@ -17,6 +21,7 @@ from pathlib import Path
 # ---------------------------------------------------------------------------
 _TEST_DATA_DIR = Path(tempfile.mkdtemp(prefix="email2rss_test_"))
 (_TEST_DATA_DIR / "feed").mkdir(parents=True, exist_ok=True)
+atexit.register(shutil.rmtree, _TEST_DATA_DIR, ignore_errors=True)
 
 os.environ["data_dir"] = str(_TEST_DATA_DIR)
 os.environ["max_item_per_feed"] = "100"
@@ -36,7 +41,7 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-import database  # noqa: E402
+import database
 
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
@@ -69,9 +74,12 @@ def db_session(monkeypatch):
     monkeypatch.setattr(database, "engine", engine)
     monkeypatch.setattr(database, "Session", SessionLocal)
 
-    yield SessionLocal()
-
-    engine.dispose()
+    session = SessionLocal()
+    try:
+        yield session
+    finally:
+        session.close()
+        engine.dispose()
 
 
 @pytest.fixture
@@ -103,18 +111,21 @@ def insert_email(
     timestamp=None,
 ):
     """
-    Helper: insert an email row. Content defaults to the canonical MIME sample,
-    re-rewritten so that Subject/Date/From match the caller-supplied values
-    (needed for GUID calculation to match).
-    """
-    import datetime
+    Helper: insert an email row.
 
+    When `content` is omitted, the canonical multipart MIME sample is loaded
+    and its Subject/Date/From headers are rewritten to match the caller's
+    arguments. The rewritten From header uses the bare `sender` address
+    (no display name) so tests can compute the GUID as
+    `md5(subject + date_str + sender)` — matching what `database` and
+    `feed_generator` compute from `msg["from"]`.
+    """
     if content is None:
-        raw = _load_sample_eml().decode("utf-8", errors="ignore")
-        raw = raw.replace("Hello from the test suite", subject)
-        raw = raw.replace("Mon, 13 Apr 2026 10:00:00 +0000", date_str)
-        raw = raw.replace("Sender Name <sender@example.com>", f"Sender Name <{sender}>")
-        content = raw.encode("utf-8")
+        msg = email_mod.message_from_bytes(_load_sample_eml())
+        msg.replace_header("Subject", subject)
+        msg.replace_header("Date", date_str)
+        msg.replace_header("From", sender)
+        content = msg.as_bytes()
 
     if timestamp is None:
         timestamp = datetime.datetime(2026, 4, 13, 10, 0, 0)
