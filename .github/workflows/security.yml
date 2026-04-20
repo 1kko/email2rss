@@ -35,7 +35,8 @@ jobs:
       - name: Generate requirements and audit
         run: |
           pip install poetry
-          poetry show --no-ansi | awk '{print $1"=="$2}' > requirements.txt
+          poetry self add poetry-plugin-export
+          poetry export --without-hashes --format requirements.txt > requirements.txt
           pip-audit --requirement requirements.txt
 
   sbom:

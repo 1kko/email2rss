@@ -342,7 +342,7 @@ def main():
         try:
             for sender in senders:
                 messages = db.get_email(sender)
-                logging.info(f"{sender} found entries={messages.count()}")
+                logging.info(f"{sender} found entries={len(messages)}")
                 try:
                     rss_feed = generate_rss(sender, messages)
                     feed_file_path = save_feed(sender, rss_feed, save_path=data_feed_dir)

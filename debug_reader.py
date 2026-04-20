@@ -33,7 +33,7 @@ def debug_info():
     senders = db.get_senders()
     for idx, sender in enumerate(senders, 1):
         emails = db.get_email(sender)
-        print(f"  {idx}. {sender} ({emails.count()} emails)")
+        print(f"  {idx}. {sender} ({len(emails)} emails)")
 
     # Check specific sender if provided
     if len(sys.argv) > 1:
@@ -41,7 +41,7 @@ def debug_info():
         print(f"\n[4] Checking emails from: {target_sender}")
 
         emails = db.get_email(target_sender)
-        email_count = emails.count()
+        email_count = len(emails)
 
         if email_count == 0:
             print(f"  ⚠️  No emails found from {target_sender}")
