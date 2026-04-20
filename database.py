@@ -152,17 +152,13 @@ def get_email(sender: str) -> list:
     max_item_per_feed = config.get("max_item_per_feed")
 
     with Session() as session:
-        emails = (
+        return (
             session.query(Email)
             .filter_by(sender=sender)
             .order_by(Email.timestamp.desc())
             .limit(max_item_per_feed)
+            .all()
         )
-        # BUG: returns an unevaluated Query, not a list (return annotation is wrong).
-        # Downstream callers must wrap with list(...) to materialize before the
-        # session context exits. Fix: call .all() here. Covered by characterization
-        # in tests/test_database.py::test_get_email_returns_newest_first (via list()).
-        return emails
 
 
 def get_senders() -> list:
