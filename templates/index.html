@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block title %}email2rss{% endblock %}
+{% block body %}
+<h1>email2rss</h1>
+{% if enable_internal_reader %}
+<p><a href="/article">Open internal reader</a></p>
+{% endif %}
+<ul>
+  {% for name in entries %}
+    <li><a href="/{{ name }}">{{ name }}</a></li>
+  {% endfor %}
+</ul>
+{% endblock %}

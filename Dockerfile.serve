@@ -13,6 +13,7 @@ RUN uv pip install --system -r requirements.txt
 
 COPY *.py /app/
 COPY static/ /app/static/
+COPY templates/ /app/templates/
 COPY entrypoint.sh /app/entrypoint.sh
 RUN chmod +x /app/entrypoint.sh
 
