@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}{{ subject }}{% endblock %}
+{% block body %}
+<article>
+  <header>
+    <h1>{{ subject }}</h1>
+    <p class="meta">From: {{ sender }} | Date: {{ date }}</p>
+  </header>
+  <div class="content">
+    {# content is pre-sanitized via util.sanitize_html #}
+    {{ content|safe }}
+  </div>
+</article>
+<script src="{{ url_for('static', filename='reader.js') }}"></script>
+{% endblock %}

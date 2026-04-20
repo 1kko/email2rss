@@ -6,12 +6,11 @@ from __future__ import annotations
 
 import email as email_mod
 import email.header
-import html as html_module
 import os
 import ssl
 from pathlib import Path
 
-from flask import Flask, abort, jsonify, send_from_directory
+from flask import Flask, abort, jsonify, render_template, send_from_directory
 
 import database as db
 from common import logging, config
@@ -20,6 +19,7 @@ from util import cleanse_content, sanitize_html
 
 PROJECT_ROOT = Path(__file__).parent
 STATIC_DIR = PROJECT_ROOT / "static"
+TEMPLATE_DIR = PROJECT_ROOT / "templates"
 FEED_DIR = (Path(config.get("data_dir", "data")) / "feed").resolve()
 
 
@@ -73,118 +73,8 @@ def extract_article_content(msg) -> str:
     return sanitize_html(content)
 
 
-def generate_article_html(subject: str, sender: str, date: str, content: str) -> str:
-    escaped_subject = html_module.escape(subject)
-    escaped_sender = html_module.escape(sender)
-    escaped_date = html_module.escape(date or "")
-    return f"""<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{escaped_subject}</title>
-    <link rel="stylesheet" href="/static/reader.css">
-</head>
-<body>
-    <article>
-        <header>
-            <h1>{escaped_subject}</h1>
-            <p class="meta">From: {escaped_sender} | Date: {escaped_date}</p>
-        </header>
-        <div class="content">
-            {content}
-        </div>
-    </article>
-    <script src="/static/reader.js"></script>
-</body>
-</html>"""
-
-
-def generate_article_list_html(articles, senders=None, specific_sender=None) -> str:
-    if specific_sender:
-        escaped_sender = html_module.escape(specific_sender)
-        page_title = f"Articles from {escaped_sender}"
-        header_html = f"""
-            <header>
-                <h1>Articles from {escaped_sender}</h1>
-                <p class="meta">
-                    Total articles: {len(articles)} |
-                    <a href="/article" style="color: var(--link-color);">View all feeds</a>
-                </p>
-            </header>
-        """
-    else:
-        total_articles = len(articles)
-        total_feeds = len(senders) if senders else 0
-        page_title = "All Articles"
-
-        feed_stats_html = ""
-        if senders:
-            feed_stats_html = "<div class='feed-stats'><h2>Feeds</h2><ul class='feed-list'>"
-            for sender, stats in sorted(senders.items(), key=lambda x: x[1]["latest"], reverse=True):
-                last_updated = stats["latest"].strftime("%Y-%m-%d %H:%M")
-                feed_stats_html += f"""
-                    <li>
-                        <a href="/article/{stats['feed_name']}">{html_module.escape(sender)}</a>
-                        <span class="meta">({stats['count']} articles, last updated: {last_updated})</span>
-                    </li>
-                """
-            feed_stats_html += "</ul></div>"
-
-        header_html = f"""
-            <header>
-                <h1>All Articles</h1>
-                <p class="meta">Total feeds: {total_feeds} | Total articles: {total_articles}</p>
-            </header>
-            {feed_stats_html}
-        """
-
-    articles_html = "<div class='article-list'><h2>Recent Articles</h2><ul class='article-items'>"
-    for article in articles:
-        feed_name = sanitize_feed_name(article["sender"])
-        article_url = f"/article/{feed_name}/{article['guid']}"
-        articles_html += f"""
-            <li class='article-item'>
-                <a href="{article_url}" class='article-title'>{html_module.escape(article['subject'])}</a>
-                <div class="meta">
-                    From: <a href="/article/{feed_name}">{html_module.escape(article['sender'])}</a> |
-                    Date: {html_module.escape(article['date'] or '')}
-                </div>
-            </li>
-        """
-    articles_html += "</ul></div>"
-
-    return f"""<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{page_title}</title>
-    <link rel="stylesheet" href="/static/reader.css">
-    <style>
-        .feed-stats {{ margin: 2rem 0; padding: 1.5rem; background-color: var(--code-bg); border-radius: 8px; }}
-        .feed-stats h2 {{ margin-bottom: 1rem; font-size: 1.5rem; }}
-        .feed-list {{ list-style: none; padding: 0; }}
-        .feed-list li {{ padding: 0.75rem 0; border-bottom: 1px solid var(--border-color); }}
-        .feed-list li:last-child {{ border-bottom: none; }}
-        .feed-list a {{ color: var(--link-color); text-decoration: none; font-weight: 600; font-size: 1.1rem; }}
-        .feed-list a:hover {{ text-decoration: underline; }}
-        .article-list {{ margin: 2rem 0; }}
-        .article-list h2 {{ margin-bottom: 1rem; font-size: 1.5rem; }}
-        .article-items {{ list-style: none; padding: 0; }}
-        .article-item {{ padding: 1rem 0; border-bottom: 1px solid var(--border-color); }}
-        .article-item:last-child {{ border-bottom: none; }}
-        .article-title {{ color: var(--link-color); text-decoration: none; font-weight: 600; font-size: 1.2rem; display: block; margin-bottom: 0.5rem; }}
-        .article-title:hover {{ text-decoration: underline; }}
-    </style>
-</head>
-<body>
-    <article>
-        {header_html}
-        {articles_html}
-    </article>
-</body>
-</html>"""
+def _attach_feed_names(articles):
+    return [{**a, "feed_name": sanitize_feed_name(a["sender"])} for a in articles]
 
 
 def create_app() -> Flask:
@@ -192,6 +82,7 @@ def create_app() -> Flask:
         __name__,
         static_folder=str(STATIC_DIR),
         static_url_path="/static",
+        template_folder=str(TEMPLATE_DIR),
     )
 
     @app.after_request
@@ -225,9 +116,9 @@ def create_app() -> Flask:
 
     @app.get("/article")
     def article_list():
-        articles = db.get_all_emails_with_metadata()
+        articles_raw = db.get_all_emails_with_metadata()
         senders: dict = {}
-        for article in articles:
+        for article in articles_raw:
             sender = article["sender"]
             if sender not in senders:
                 senders[sender] = {
@@ -238,15 +129,29 @@ def create_app() -> Flask:
             senders[sender]["count"] += 1
             if article["timestamp"] > senders[sender]["latest"]:
                 senders[sender]["latest"] = article["timestamp"]
-        return generate_article_list_html(articles, senders, None)
+
+        sorted_senders = sorted(senders.items(), key=lambda x: x[1]["latest"], reverse=True)
+        return render_template(
+            "article_list.html",
+            page_title="All Articles",
+            articles=_attach_feed_names(articles_raw),
+            senders=sorted_senders,
+            specific_sender=None,
+        )
 
     @app.get("/article/<feed_name>")
     def feed_article_list(feed_name):
         sender_email = feed_name_to_email(feed_name)
-        articles = db.get_emails_by_sender_with_metadata(sender_email)
-        if not articles:
+        articles_raw = db.get_emails_by_sender_with_metadata(sender_email)
+        if not articles_raw:
             abort(404)
-        return generate_article_list_html(articles, None, sender_email)
+        return render_template(
+            "article_list.html",
+            page_title=f"Articles from {sender_email}",
+            articles=_attach_feed_names(articles_raw),
+            senders=None,
+            specific_sender=sender_email,
+        )
 
     @app.get("/article/<feed_name>/<guid>")
     def view_article(feed_name, guid):
@@ -258,9 +163,13 @@ def create_app() -> Flask:
 
             msg = email_mod.message_from_bytes(record.content)
             subject = str(email_mod.header.make_header(email_mod.header.decode_header(msg["subject"])))
-            date_text = msg["date"]
-            content = extract_article_content(msg)
-            return generate_article_html(subject, sender_email, date_text, content)
+            return render_template(
+                "article.html",
+                subject=subject,
+                sender=sender_email,
+                date=msg["date"] or "",
+                content=extract_article_content(msg),
+            )
         except Exception:
             logging.exception(f"Error serving article {feed_name}/{guid}")
             abort(500)
@@ -268,19 +177,17 @@ def create_app() -> Flask:
     @app.get("/")
     def index():
         try:
-            entries = sorted(p.name for p in FEED_DIR.iterdir() if p.is_file() and not p.name.endswith(".db"))
+            entries = sorted(
+                p.name for p in FEED_DIR.iterdir()
+                if p.is_file() and not p.name.endswith(".db")
+            )
         except FileNotFoundError:
             entries = []
-
-        items = "\n".join(f'<li><a href="/{html_module.escape(name)}">{html_module.escape(name)}</a></li>' for name in entries)
-        reader_link = '<p><a href="/article">Open internal reader</a></p>' if config.get("enable_internal_reader") else ""
-        return f"""<!DOCTYPE html>
-<html><head><meta charset="UTF-8"><title>email2rss</title></head>
-<body>
-<h1>email2rss</h1>
-{reader_link}
-<ul>{items}</ul>
-</body></html>"""
+        return render_template(
+            "index.html",
+            entries=entries,
+            enable_internal_reader=bool(config.get("enable_internal_reader")),
+        )
 
     @app.get("/<path:filename>")
     def serve_feed_file(filename):

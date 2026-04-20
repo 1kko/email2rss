@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block title %}{{ page_title }}{% endblock %}
+{% block head %}
+<style>
+  .feed-stats { margin: 2rem 0; padding: 1.5rem; background-color: var(--code-bg); border-radius: 8px; }
+  .feed-stats h2 { margin-bottom: 1rem; font-size: 1.5rem; }
+  .feed-list { list-style: none; padding: 0; }
+  .feed-list li { padding: 0.75rem 0; border-bottom: 1px solid var(--border-color); }
+  .feed-list li:last-child { border-bottom: none; }
+  .feed-list a { color: var(--link-color); text-decoration: none; font-weight: 600; font-size: 1.1rem; }
+  .feed-list a:hover { text-decoration: underline; }
+  .article-list { margin: 2rem 0; }
+  .article-list h2 { margin-bottom: 1rem; font-size: 1.5rem; }
+  .article-items { list-style: none; padding: 0; }
+  .article-item { padding: 1rem 0; border-bottom: 1px solid var(--border-color); }
+  .article-item:last-child { border-bottom: none; }
+  .article-title { color: var(--link-color); text-decoration: none; font-weight: 600; font-size: 1.2rem; display: block; margin-bottom: 0.5rem; }
+  .article-title:hover { text-decoration: underline; }
+</style>
+{% endblock %}
+{% block body %}
+<article>
+  {% if specific_sender %}
+    <header>
+      <h1>Articles from {{ specific_sender }}</h1>
+      <p class="meta">
+        Total articles: {{ articles|length }} |
+        <a href="/article" style="color: var(--link-color);">View all feeds</a>
+      </p>
+    </header>
+  {% else %}
+    <header>
+      <h1>All Articles</h1>
+      <p class="meta">Total feeds: {{ senders|length }} | Total articles: {{ articles|length }}</p>
+    </header>
+    {% if senders %}
+    <div class="feed-stats">
+      <h2>Feeds</h2>
+      <ul class="feed-list">
+        {% for sender, stats in senders %}
+          <li>
+            <a href="/article/{{ stats.feed_name }}">{{ sender }}</a>
+            <span class="meta">({{ stats.count }} articles, last updated: {{ stats.latest.strftime('%Y-%m-%d %H:%M') }})</span>
+          </li>
+        {% endfor %}
+      </ul>
+    </div>
+    {% endif %}
+  {% endif %}
+
+  <div class="article-list">
+    <h2>Recent Articles</h2>
+    <ul class="article-items">
+      {% for article in articles %}
+        <li class="article-item">
+          <a href="/article/{{ article.feed_name }}/{{ article.guid }}" class="article-title">{{ article.subject }}</a>
+          <div class="meta">
+            From: <a href="/article/{{ article.feed_name }}">{{ article.sender }}</a> |
+            Date: {{ article.date or '' }}
+          </div>
+        </li>
+      {% endfor %}
+    </ul>
+  </div>
+</article>
+{% endblock %}
