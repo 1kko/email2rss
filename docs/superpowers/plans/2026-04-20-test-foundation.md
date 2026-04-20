@@ -493,18 +493,22 @@ def test_generate_rss_produces_parseable_rss_xml(db_session):
     assert {"First", "Second"}.issubset(set(titles))
 
 
-def test_generate_rss_reverses_input_order(db_session):
-    """generate_rss calls messages.reverse() before iterating — so RSS order
-    is the reverse of the input list order (input is newest-first from DB)."""
+def test_generate_rss_produces_newest_first_rss_order(db_session):
+    """RSS output is newest-first.
+
+    `generate_rss` calls `messages_list.reverse()` before iterating, BUT
+    `feedgen.add_entry()` prepends each new entry (inserts at index 0). The
+    two reversals cancel out, so RSS order matches the DB query order
+    (newest-first). This test pins that neutralizing double-transformation.
+    """
     insert_email(db_session, email_id=1, subject="Oldest", timestamp=datetime.datetime(2026, 4, 10))
     insert_email(db_session, email_id=2, subject="Middle", timestamp=datetime.datetime(2026, 4, 11))
     insert_email(db_session, email_id=3, subject="Newest", timestamp=datetime.datetime(2026, 4, 12))
 
-    # DB returns newest-first: [Newest, Middle, Oldest]; generate_rss reverses → RSS: [Oldest, Middle, Newest]
     messages = list(feed_generator.db.get_email("sender@example.com"))
     xml = feed_generator.generate_rss("sender@example.com", messages)
     titles = [it.findtext("title") for it in _rss_items(xml)]
-    assert titles == ["Oldest", "Middle", "Newest"]
+    assert titles == ["Newest", "Middle", "Oldest"]
 
 
 def test_internal_reader_mode_links_to_article_viewer(db_session, monkeypatch):

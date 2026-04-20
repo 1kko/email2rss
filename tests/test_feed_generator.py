@@ -16,7 +16,7 @@ def test_generate_rss_produces_parseable_rss_xml(db_session):
     insert_email(db_session, email_id=1, subject="First")
     insert_email(db_session, email_id=2, subject="Second", timestamp=datetime.datetime(2026, 4, 14))
 
-    messages = list(db_session.query(feed_generator.db.Email).filter_by(sender="sender@example.com"))
+    messages = list(feed_generator.db.get_email("sender@example.com"))
     xml = feed_generator.generate_rss("sender@example.com", messages)
     items = _rss_items(xml)
     assert len(items) == 2
@@ -24,14 +24,13 @@ def test_generate_rss_produces_parseable_rss_xml(db_session):
     assert {"First", "Second"}.issubset(set(titles))
 
 
-def test_generate_rss_reverses_input_order(db_session):
-    """Characterize actual RSS item ordering.
+def test_generate_rss_produces_newest_first_rss_order(db_session):
+    """RSS output is newest-first.
 
-    DB returns newest-first: [Newest, Middle, Oldest].
-    generate_rss reverses to [Oldest, Middle, Newest] before iterating, but
-    feedgen.add_entry() prepends each entry (newest index 0), so the reversal
-    and the prepend cancel out: RSS output order is newest-first,
-    matching the original DB query order.
+    `generate_rss` calls `messages_list.reverse()` before iterating, BUT
+    `feedgen.add_entry()` prepends each new entry (inserts at index 0). The
+    two reversals cancel out, so RSS order matches the DB query order
+    (newest-first). This test pins that neutralizing double-transformation.
     """
     insert_email(db_session, email_id=1, subject="Oldest", timestamp=datetime.datetime(2026, 4, 10))
     insert_email(db_session, email_id=2, subject="Middle", timestamp=datetime.datetime(2026, 4, 11))
@@ -48,7 +47,6 @@ def test_generate_rss_reverses_input_order(db_session):
 
 def test_internal_reader_mode_links_to_article_viewer(db_session, monkeypatch):
     monkeypatch.setitem(feed_generator.config, "enable_internal_reader", True)
-    monkeypatch.setitem(feed_generator.config, "server_baseurl", "http://testserver")
     insert_email(db_session, email_id=1)
 
     messages = list(feed_generator.db.get_email("sender@example.com"))
