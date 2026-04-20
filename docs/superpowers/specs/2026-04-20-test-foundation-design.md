@@ -105,9 +105,9 @@ Target: ~22 tests producing first green CI.
 - `GET /<feed>.xml` → 200, `application/rss+xml`, valid XML
 - `GET /<feed>.xml` for unknown feed → 404
 - `GET /subscriptions.opml` → 200, valid OPML
-- `GET /article/<feed>/<guid>` with reader disabled → 404
+- `GET /article/<feed>/<guid>` with reader disabled → 404 (NOT implemented: reader flag is not checked; deferred to sub-project 2)
 - `GET /article/<feed>/<guid>` with reader enabled, valid row → 200, body contains email HTML
-- `GET /article/<feed>/<guid>` with reader enabled, unknown guid → 404
+- `GET /article/<feed>/<guid>` with reader enabled, unknown guid → characterized as 500 (BUG: `abort(404)` is swallowed by `except Exception` in `view_article`; fix in a future task, see `tests/test_feed_server.py`)
 
 ## IMAP testing approach
 

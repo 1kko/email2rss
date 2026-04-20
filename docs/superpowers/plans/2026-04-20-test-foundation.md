@@ -38,7 +38,7 @@ Note: the design spec mentions "`sanitize_filename`, `strip_html`, etc." as exam
 - Create: `tests/__init__.py`
 - Create: `tests/fixtures/__init__.py`
 
-- [ ] **Step 1.1: Add `test` optional-dependency group to `pyproject.toml`**
+- [x] **Step 1.1: Add `test` optional-dependency group to `pyproject.toml`**
 
 In `pyproject.toml`, add this block under `[project]` (after the `dependencies` list):
 
@@ -70,14 +70,14 @@ Also update `[tool.ruff.lint.per-file-ignores]` to skip the `S` (security) lint 
 "tests/*" = ["S"]
 ```
 
-- [ ] **Step 1.2: Create empty `__init__.py` files**
+- [x] **Step 1.2: Create empty `__init__.py` files**
 
 ```bash
 mkdir -p tests/fixtures/emails tests/fixtures/feeds
 touch tests/__init__.py tests/fixtures/__init__.py
 ```
 
-- [ ] **Step 1.3: Verify install works**
+- [x] **Step 1.3: Verify install works**
 
 Run:
 ```bash
@@ -87,7 +87,7 @@ pytest --collect-only
 
 Expected: pytest installs and reports `no tests ran` (collection succeeds because `testpaths` points to an existing empty directory).
 
-- [ ] **Step 1.4: Commit**
+- [x] **Step 1.4: Commit**
 
 ```bash
 git add pyproject.toml tests/__init__.py tests/fixtures/__init__.py
@@ -102,7 +102,7 @@ git commit -m "test: add pytest scaffolding and test deps"
 - Create: `tests/conftest.py`
 - Create: `tests/fixtures/emails/sample_multipart.eml`
 
-- [ ] **Step 2.1: Create a sample MIME email fixture**
+- [x] **Step 2.1: Create a sample MIME email fixture**
 
 Create `tests/fixtures/emails/sample_multipart.eml` with:
 
@@ -129,7 +129,7 @@ Content-Transfer-Encoding: 7bit
 --BOUNDARY--
 ```
 
-- [ ] **Step 2.2: Write `tests/conftest.py`**
+- [x] **Step 2.2: Write `tests/conftest.py`**
 
 Create `tests/conftest.py`:
 
@@ -267,7 +267,7 @@ def insert_email(
     return row
 ```
 
-- [ ] **Step 2.3: Smoke-check that the fixture file loads and `pytest --collect-only` still works**
+- [x] **Step 2.3: Smoke-check that the fixture file loads and `pytest --collect-only` still works**
 
 Run:
 ```bash
@@ -276,7 +276,7 @@ pytest --collect-only
 
 Expected: `no tests ran` (no tests yet, but collection succeeds with no errors). If it errors on `import database`, the env-var ordering in conftest is wrong — env vars must be set **before** the `import database` line.
 
-- [ ] **Step 2.4: Commit**
+- [x] **Step 2.4: Commit**
 
 ```bash
 git add tests/conftest.py tests/fixtures/emails/sample_multipart.eml
@@ -290,7 +290,7 @@ git commit -m "test: add conftest fixtures and sample MIME email"
 **Files:**
 - Create: `tests/test_util.py`
 
-- [ ] **Step 3.1: Write all four tests**
+- [x] **Step 3.1: Write all four tests**
 
 Create `tests/test_util.py`:
 
@@ -334,7 +334,7 @@ def test_sanitize_html_removes_script_and_event_handlers():
 
 (That's 5 test functions but 4 covered behaviors — `extract_email_address` has two cases. Count it as 5 tests; still within the seed target.)
 
-- [ ] **Step 3.2: Run the tests**
+- [x] **Step 3.2: Run the tests**
 
 Run:
 ```bash
@@ -343,7 +343,7 @@ pytest tests/test_util.py -v
 
 Expected: all 5 tests PASS. If any fail, the existing helper behavior differs from what the test asserts — check which and either (a) fix the test to match actual behavior or (b) flag a real bug for follow-up (seed tests should characterize *current* behavior, not invent new requirements).
 
-- [ ] **Step 3.3: Commit**
+- [x] **Step 3.3: Commit**
 
 ```bash
 git add tests/test_util.py
@@ -357,7 +357,7 @@ git commit -m "test: add util.py characterization tests"
 **Files:**
 - Create: `tests/test_database.py`
 
-- [ ] **Step 4.1: Write the tests**
+- [x] **Step 4.1: Write the tests**
 
 Create `tests/test_database.py`:
 
@@ -439,7 +439,7 @@ def test_required_indexes_exist(db_session):
 
 Note on the last test: when `db_session` creates the schema via `Base.metadata.create_all()`, SQLAlchemy creates all four indexes declared on the `Email` model (three from `Column(..., index=True)` + one from `__table_args__`). The `migrate_database()` runtime path also creates them, so this test covers both paths.
 
-- [ ] **Step 4.2: Run the tests**
+- [x] **Step 4.2: Run the tests**
 
 Run:
 ```bash
@@ -448,7 +448,7 @@ pytest tests/test_database.py -v
 
 Expected: all 6 tests PASS.
 
-- [ ] **Step 4.3: Commit**
+- [x] **Step 4.3: Commit**
 
 ```bash
 git add tests/test_database.py
@@ -462,7 +462,7 @@ git commit -m "test: add database.py characterization tests"
 **Files:**
 - Create: `tests/test_feed_generator.py`
 
-- [ ] **Step 5.1: Write the tests**
+- [x] **Step 5.1: Write the tests**
 
 Create `tests/test_feed_generator.py`:
 
@@ -532,7 +532,7 @@ def test_external_mode_links_to_sender_domain(db_session, monkeypatch):
     assert link == "https://tailscale.com"
 ```
 
-- [ ] **Step 5.2: Run the tests**
+- [x] **Step 5.2: Run the tests**
 
 Run:
 ```bash
@@ -541,7 +541,7 @@ pytest tests/test_feed_generator.py -v
 
 Expected: all 4 tests PASS. If `test_generate_rss_reverses_input_order` fails, reconcile with the actual `generate_rss` behavior (see `feed_generator.py:87-89` — it calls `messages_list.reverse()` before iteration).
 
-- [ ] **Step 5.3: Commit**
+- [x] **Step 5.3: Commit**
 
 ```bash
 git add tests/test_feed_generator.py
@@ -555,7 +555,7 @@ git commit -m "test: add feed_generator characterization tests"
 **Files:**
 - Create: `tests/test_feed_server.py`
 
-- [ ] **Step 6.1: Write the tests**
+- [x] **Step 6.1: Write the tests**
 
 Create `tests/test_feed_server.py`:
 
@@ -664,7 +664,7 @@ Two clarifying notes for the implementer:
 1. The `/article/<feed>/<guid>` route in `feed_server.py` does not check `enable_internal_reader` — it always tries to find and render the article. The spec's design called for a 404 when reader is disabled, but that's a sub-project 2 concern. No monkeypatching of `enable_internal_reader` is needed in these tests. If time permits, file an issue noting the discrepancy; otherwise leave as-is.
 2. The `client` fixture reloads `feed_server` and monkeypatches `FEED_DIR`, so each test gets a fresh `FEED_DIR = tmp_path`.
 
-- [ ] **Step 6.2: Run the tests**
+- [x] **Step 6.2: Run the tests**
 
 Run:
 ```bash
@@ -673,7 +673,7 @@ pytest tests/test_feed_server.py -v
 
 Expected: all 8 tests PASS. If a test fails due to current-behavior mismatch (common on the article/404 tests), adjust the test assertion to match what the server does today — these are characterization tests, not a wishlist.
 
-- [ ] **Step 6.3: Commit**
+- [x] **Step 6.3: Commit**
 
 ```bash
 git add tests/test_feed_server.py
@@ -687,7 +687,7 @@ git commit -m "test: add feed_server route tests"
 **Files:**
 - Create: `.github/workflows/ci.yml`
 
-- [ ] **Step 7.1: Write the workflow**
+- [x] **Step 7.1: Write the workflow**
 
 Create `.github/workflows/ci.yml`:
 
@@ -735,7 +735,7 @@ jobs:
         run: docker build -f Dockerfile.fetch_and_generate -t email2rss-fetch:ci .
 ```
 
-- [ ] **Step 7.2: Sanity-check locally**
+- [x] **Step 7.2: Sanity-check locally**
 
 Run the same commands the workflow runs, to catch obvious problems before pushing:
 
@@ -748,7 +748,7 @@ docker build -f Dockerfile.fetch_and_generate -t email2rss-fetch:ci .
 
 Expected: all four commands succeed. If `ruff check .` flags anything in the new `tests/` files, either fix the issue or extend `[tool.ruff.lint.per-file-ignores]` in `pyproject.toml` to cover the pattern.
 
-- [ ] **Step 7.3: Commit**
+- [x] **Step 7.3: Commit**
 
 ```bash
 git add .github/workflows/ci.yml
@@ -762,7 +762,7 @@ git commit -m "ci: add lint + test + docker-build workflow"
 **Files:**
 - Modify: `README.md`
 
-- [ ] **Step 8.1: Run the full suite one more time**
+- [x] **Step 8.1: Run the full suite one more time**
 
 ```bash
 pytest -v
@@ -770,7 +770,7 @@ pytest -v
 
 Expected: ~22 tests PASS (4-5 util, 6 database, 4 feed_generator, 8 feed_server). Zero failures.
 
-- [ ] **Step 8.2: Add a short "Development" section to `README.md`**
+- [x] **Step 8.2: Add a short "Development" section to `README.md`**
 
 In `README.md`, add this section just above the `## License` line:
 
@@ -793,29 +793,25 @@ ruff check .
 CI (GitHub Actions) runs lint, tests, and docker builds on every push and pull request to `master`.
 ```
 
-- [ ] **Step 8.3: Commit**
+- [x] **Step 8.3: Commit**
 
 ```bash
 git add README.md
 git commit -m "docs: add Development section for test setup"
 ```
 
-- [ ] **Step 8.4: Push and verify CI is green**
+- [x] **Step 8.4: Push branch and verify CI via PR**
 
-```bash
-git push origin master
-```
-
-Then open the Actions tab on GitHub and confirm the CI workflow runs all three jobs to green. If any job fails, iterate locally (do **not** amend published commits — add follow-up commits).
+This branch (`feat/test-foundation`) is pushed to the remote and a pull request is opened against `master`. CI runs via the PR's `pull_request` trigger — not via a direct push to master. Confirm all three jobs (lint, test, docker-build) pass on the PR before merging.
 
 ---
 
 ## Acceptance criteria checklist
 
-- [ ] `pytest` runs locally, ~22 tests all pass
-- [ ] `pip install -e '.[test]'` installs cleanly
-- [ ] CI workflow exists at `.github/workflows/ci.yml`
+- [x] `pytest` runs locally, ~22 tests all pass
+- [x] `pip install -e '.[test]'` installs cleanly
+- [x] CI workflow exists at `.github/workflows/ci.yml`
 - [ ] All three CI jobs (lint, test, docker-build) pass on push to a branch
-- [ ] Coverage report prints to CI logs
+- [x] Coverage report prints to CI logs
 - [ ] `docker-compose up` and `poetry run python start.py` still work (manually verified)
-- [ ] `README.md` has a Development section documenting the test commands
+- [x] `README.md` has a Development section documenting the test commands
