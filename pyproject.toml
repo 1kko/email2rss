@@ -24,9 +24,10 @@ dependencies = [
     "opentelemetry-instrumentation-sqlalchemy>=0.50b0,<1.0",
     "opentelemetry-instrumentation-requests>=0.50b0,<1.0",
     "opentelemetry-instrumentation-logging>=0.50b0,<1.0",
+    "requests (>=2.33.0)",
 ]
 readme = "README.md"
-requires-python = ">= 3.9"
+requires-python = ">= 3.10"
 
 [project.optional-dependencies]
 test = [
@@ -45,7 +46,7 @@ allow-direct-references = true
 packages = ["src/email2rss"]
 
 [tool.poetry.dependencies]
-python = "^3.9"
+python = "^3.10"
 feedgen = "^1.0.0"
 python-dotenv = "^1.0.1"
 sqlalchemy = "^2.0.30"
@@ -58,6 +59,7 @@ opentelemetry-instrumentation-flask = ">=0.50b0,<1.0"
 opentelemetry-instrumentation-sqlalchemy = ">=0.50b0,<1.0"
 opentelemetry-instrumentation-requests = ">=0.50b0,<1.0"
 opentelemetry-instrumentation-logging = ">=0.50b0,<1.0"
+requests = ">=2.33.0"
 
 
 [tool.ruff]
