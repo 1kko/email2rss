@@ -2,27 +2,17 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
-# Install Poetry
 RUN pip install poetry uv
-
-# Needs to install poetry plugin: export
 RUN poetry self add poetry-plugin-export
 
-# Add the current directory contents into the container at /app
 COPY pyproject.toml .
-
-COPY *.py /app/
-
-RUN poetry lock
 COPY poetry.lock .
-# extract requirements.txt
-COPY pyproject.toml .
-RUN poetry lock 
-RUN poetry export --without-hashes > ./requirements.txt
 
-# install requiremnts using uv --system (hence virtualenv is not required in container)
+RUN poetry export --without-hashes > ./requirements.txt
 RUN uv pip install --system -r requirements.txt
 
 COPY *.py /app/
+COPY entrypoint.sh /app/entrypoint.sh
+RUN chmod +x /app/entrypoint.sh
 
-CMD ["python", "-c", "from start import fetch_and_generate; fetch_and_generate()"]
+CMD ["/app/entrypoint.sh", "fetch"]

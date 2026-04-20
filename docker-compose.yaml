@@ -9,6 +9,16 @@ services:
       - ./data:/app/data
     env_file:
       - .env
+    environment:
+      # OpenTelemetry (optional — only active if OTEL_EXPORTER_OTLP_ENDPOINT is set)
+      - OTEL_SERVICE_NAME=email2rss-fetcher
+      - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+      - OTEL_EXPORTER_OTLP_PROTOCOL=${OTEL_EXPORTER_OTLP_PROTOCOL:-http/protobuf}
+      - OTEL_TRACES_EXPORTER=${OTEL_TRACES_EXPORTER:-otlp}
+      - OTEL_METRICS_EXPORTER=${OTEL_METRICS_EXPORTER:-otlp}
+      - OTEL_LOGS_EXPORTER=${OTEL_LOGS_EXPORTER:-otlp}
+      - OTEL_PYTHON_LOG_CORRELATION=${OTEL_PYTHON_LOG_CORRELATION:-true}
+      - OTEL_RESOURCE_ATTRIBUTES=${OTEL_RESOURCE_ATTRIBUTES:-}
 
   serve:
     build:
@@ -17,9 +27,17 @@ services:
     container_name: serve
     env_file:
       - .env
+    environment:
+      - OTEL_SERVICE_NAME=email2rss-server
+      - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+      - OTEL_EXPORTER_OTLP_PROTOCOL=${OTEL_EXPORTER_OTLP_PROTOCOL:-http/protobuf}
+      - OTEL_TRACES_EXPORTER=${OTEL_TRACES_EXPORTER:-otlp}
+      - OTEL_METRICS_EXPORTER=${OTEL_METRICS_EXPORTER:-otlp}
+      - OTEL_LOGS_EXPORTER=${OTEL_LOGS_EXPORTER:-otlp}
+      - OTEL_PYTHON_LOG_CORRELATION=${OTEL_PYTHON_LOG_CORRELATION:-true}
+      - OTEL_RESOURCE_ATTRIBUTES=${OTEL_RESOURCE_ATTRIBUTES:-}
     ports:
       - ${port}:${port}
     restart: unless-stopped
     volumes:
       - ./data:/app/data
-

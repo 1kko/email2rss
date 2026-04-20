@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "email2rss"
-version = "0.1.0"
+version = "0.2.0"
 description = ""
 authors = ["Your Name <you@example.com>"]
 readme = "README.md"
@@ -9,13 +9,21 @@ package-mode = false
 
 [project]
 name = "email2rss"
-version = "0.1.1"
+version = "0.2.0"
 description = "Add your description here"
 dependencies = [
     "feedgen>=1.0.0",
     "python-dotenv>=1.0.1",
     "sqlalchemy>=2.0.30",
     "defusedxml>=0.7.1",
+    "flask>=3.0,<4.0",
+    "gunicorn>=22.0,<24.0",
+    "opentelemetry-distro>=0.50b0,<1.0",
+    "opentelemetry-exporter-otlp>=1.29,<2.0",
+    "opentelemetry-instrumentation-flask>=0.50b0,<1.0",
+    "opentelemetry-instrumentation-sqlalchemy>=0.50b0,<1.0",
+    "opentelemetry-instrumentation-requests>=0.50b0,<1.0",
+    "opentelemetry-instrumentation-logging>=0.50b0,<1.0",
 ]
 readme = "README.md"
 requires-python = ">= 3.9"
@@ -37,6 +45,14 @@ feedgen = "^1.0.0"
 python-dotenv = "^1.0.1"
 sqlalchemy = "^2.0.30"
 defusedxml = "^0.7.1"
+flask = ">=3.0,<4.0"
+gunicorn = ">=22.0,<24.0"
+opentelemetry-distro = ">=0.50b0,<1.0"
+opentelemetry-exporter-otlp = ">=1.29,<2.0"
+opentelemetry-instrumentation-flask = ">=0.50b0,<1.0"
+opentelemetry-instrumentation-sqlalchemy = ">=0.50b0,<1.0"
+opentelemetry-instrumentation-requests = ">=0.50b0,<1.0"
+opentelemetry-instrumentation-logging = ">=0.50b0,<1.0"
 
 
 [tool.ruff]

@@ -1,323 +1,83 @@
 #!/usr/bin/env python3
 """
-A Simple python web server which serves RSS feeds and provides an internal reader.
+Flask app serving RSS feeds, OPML subscription files, and the optional internal reader.
 """
 from __future__ import annotations
 
+import email as email_mod
+import email.header
 import html as html_module
 import os
-import functools
-import http.server
 import ssl
-import email
-import email.header
-import mimetypes
 from pathlib import Path
-from urllib.parse import urlparse
+
+from flask import Flask, abort, jsonify, send_from_directory
 
 import database as db
 from common import logging, config
 from util import cleanse_content, sanitize_html
 
 
-class RSSRequestHandler(http.server.SimpleHTTPRequestHandler):
-    """
-    Enhanced HTTP request handler with routing for RSS feeds, static assets, and internal reader.
-    """
+PROJECT_ROOT = Path(__file__).parent
+STATIC_DIR = PROJECT_ROOT / "static"
+FEED_DIR = (Path(config.get("data_dir", "data")) / "feed").resolve()
 
-    def __init__(self, *args, **kwargs):
-        self.feed_directory = kwargs.get("directory")
-        kwargs.pop("directory", None)
-        super().__init__(*args, directory=self.feed_directory, **kwargs)
 
-    def do_GET(self):
-        """
-        Serve a GET request with routing support.
-        """
-        # Block database files
-        parsed_path = urlparse(self.path).path
-        if parsed_path.endswith(".db"):
-            self.send_error(404, "File not found")
-            return
+def sanitize_feed_name(email_address: str) -> str:
+    return email_address.replace("@", "_").replace(".", "_")
 
-        safe_path = self.path.replace('\n', '').replace('\r', '')
-        logging.info(
-            f"Serving ip={self.client_address[0]} path={safe_path}"
-        )
 
-        # Route handling
-        path_parts = self.path.split("?")[0].strip("/").split("/")
+def feed_name_to_email(feed_name: str) -> str:
+    parts = feed_name.split("_")
+    if len(parts) >= 2:
+        return parts[0] + "@" + ".".join(parts[1:])
+    return feed_name.replace("_", "@", 1).replace("_", ".")
 
-        # Route: /article (list all articles)
-        if len(path_parts) == 1 and path_parts[0] == "article":
-            self.serve_article_list()
-            return
 
-        # Route: /article/{feed} (list articles from specific feed)
-        if len(path_parts) == 2 and path_parts[0] == "article":
-            self.serve_feed_article_list(path_parts[1])
-            return
+def extract_article_content(msg) -> str:
+    html_content: str | None = None
+    text_content: str | None = None
 
-        # Route: /article/{feed}/{guid} (view specific article)
-        if len(path_parts) >= 3 and path_parts[0] == "article":
-            self.serve_article(path_parts[1], path_parts[2])
-            return
+    if msg.is_multipart():
+        for part in msg.walk():
+            content_disposition = str(part.get("Content-Disposition"))
+            if "attachment" in content_disposition:
+                continue
+            charset = part.get_content_charset() or "utf-8"
+            payload = part.get_payload(decode=True)
+            if not payload:
+                continue
+            try:
+                decoded = payload.decode(charset, errors="ignore")
+            except Exception:
+                logging.debug("Skipping unparseable MIME part")
+                continue
+            ctype = part.get_content_type()
+            if ctype == "text/html":
+                html_content = cleanse_content(decoded)
+            elif ctype == "text/plain" and html_content is None:
+                text_content = cleanse_content(decoded)
+    else:
+        charset = msg.get_content_charset() or "utf-8"
+        payload = msg.get_payload(decode=True)
+        if payload:
+            decoded = payload.decode(charset, errors="ignore")
+            if msg.get_content_type() == "text/html":
+                html_content = cleanse_content(decoded)
+            elif msg.get_content_type() == "text/plain":
+                text_content = cleanse_content(decoded)
 
-        # Route: /static/{filename}
-        if len(path_parts) >= 2 and path_parts[0] == "static":
-            self.serve_static_file(path_parts[1])
-            return
+    content = html_content if html_content else (text_content or "")
+    if not html_content and text_content:
+        content = f"<pre>{content}</pre>"
+    return sanitize_html(content)
 
-        # Default: serve files from feed directory (RSS XML, OPML)
-        super().do_GET()
 
-    def serve_article(self, feed_name, guid):
-        """
-        Serve an article from the internal reader.
-
-        Args:
-            feed_name (str): Sanitized feed name (e.g., hello_tailscale_com)
-            guid (str): MD5 GUID of the article
-        """
-        try:
-            # Convert sanitized feed name back to email address
-            # This is a best-effort conversion that works for most email addresses
-            # The GUID matching ensures we get the correct email
-            parts = feed_name.split("_")
-            if len(parts) >= 2:
-                # Assume format: localpart_domain_tld
-                # First part is local, rest joined with dots form domain
-                sender_email = parts[0] + "@" + ".".join(parts[1:])
-            else:
-                # Fallback for edge cases
-                sender_email = feed_name.replace("_", "@", 1).replace("_", ".")
-
-            # Retrieve email from database by GUID
-            email_record = db.get_email_by_guid(sender_email, guid)
-
-            if not email_record:
-                self.send_error(404, "Article not found")
-                return
-
-            # Parse email content
-            msg = email.message_from_bytes(email_record.content)
-
-            # Extract subject
-            subject = email.header.make_header(email.header.decode_header(msg["subject"]))
-            subject_text = str(subject)
-
-            # Extract date
-            date_text = msg["date"]
-
-            # Extract HTML content
-            html_content = None
-            text_content = None
-
-            if msg.is_multipart():
-                for part in msg.walk():
-                    content_type = part.get_content_type()
-                    content_disposition = str(part.get("Content-Disposition"))
-                    if "attachment" not in content_disposition:
-                        charset = part.get_content_charset() or "utf-8"
-                        payload = part.get_payload(decode=True)
-                        if payload:
-                            try:
-                                payload_decoded = payload.decode(charset, errors="ignore")
-                                if content_type == "text/html":
-                                    html_content = cleanse_content(payload_decoded)
-                                elif content_type == "text/plain" and html_content is None:
-                                    text_content = cleanse_content(payload_decoded)
-                            except Exception:
-                                logging.debug("Skipping unparseable MIME part")
-                                continue
-            else:
-                charset = msg.get_content_charset() or "utf-8"
-                if msg.get_content_type() == "text/html":
-                    html_content = cleanse_content(
-                        msg.get_payload(decode=True).decode(charset, errors="ignore")
-                    )
-                elif msg.get_content_type() == "text/plain":
-                    text_content = cleanse_content(
-                        msg.get_payload(decode=True).decode(charset, errors="ignore")
-                    )
-
-            # Prefer HTML content, fallback to text
-            content = html_content if html_content else text_content or ""
-
-            # Convert plain text to HTML if needed
-            if not html_content and text_content:
-                content = f"<pre>{content}</pre>"
-
-            # Sanitize HTML content to prevent XSS
-            content = sanitize_html(content)
-
-            # Generate HTML response
-            html = self.generate_article_html(subject_text, sender_email, date_text, content)
-
-            # Send response
-            self.send_response(200)
-            self.send_header("Content-type", "text/html; charset=utf-8")
-            self.send_header("Content-Length", str(len(html.encode("utf-8"))))
-            self.send_security_headers()
-            self.end_headers()
-            self.wfile.write(html.encode("utf-8"))
-
-        except Exception as e:
-            logging.error(f"Error serving article {feed_name}/{guid}: {e}")
-            self.send_error(500, "Internal server error")
-
-    def serve_article_list(self):
-        """
-        Serve a list of all articles from all feeds.
-        """
-        try:
-            # Get all emails with metadata
-            articles = db.get_all_emails_with_metadata()
-
-            # Group articles by sender for statistics
-            senders = {}
-            for article in articles:
-                sender = article["sender"]
-                if sender not in senders:
-                    senders[sender] = {
-                        "count": 0,
-                        "latest": article["timestamp"],
-                        "feed_name": self.sanitize_feed_name(sender)
-                    }
-                senders[sender]["count"] += 1
-                if article["timestamp"] > senders[sender]["latest"]:
-                    senders[sender]["latest"] = article["timestamp"]
-
-            # Generate HTML
-            html = self.generate_article_list_html(articles, senders, None)
-
-            # Send response
-            self.send_response(200)
-            self.send_header("Content-type", "text/html; charset=utf-8")
-            self.send_header("Content-Length", str(len(html.encode("utf-8"))))
-            self.send_security_headers()
-            self.end_headers()
-            self.wfile.write(html.encode("utf-8"))
-
-        except Exception as e:
-            logging.error(f"Error serving article list: {e}")
-            self.send_error(500, "Internal server error")
-
-    def serve_feed_article_list(self, feed_name):
-        """
-        Serve a list of articles from a specific feed.
-
-        Args:
-            feed_name (str): Sanitized feed name (e.g., hello_mrdongnews_com)
-        """
-        try:
-            # Convert sanitized feed name back to email address
-            parts = feed_name.split("_")
-            if len(parts) >= 2:
-                sender_email = parts[0] + "@" + ".".join(parts[1:])
-            else:
-                sender_email = feed_name.replace("_", "@", 1).replace("_", ".")
-
-            # Get articles from this sender
-            articles = db.get_emails_by_sender_with_metadata(sender_email)
-
-            if not articles:
-                self.send_error(404, "Feed not found or no articles available")
-                return
-
-            # Generate HTML
-            html = self.generate_article_list_html(articles, None, sender_email)
-
-            # Send response
-            self.send_response(200)
-            self.send_header("Content-type", "text/html; charset=utf-8")
-            self.send_header("Content-Length", str(len(html.encode("utf-8"))))
-            self.send_security_headers()
-            self.end_headers()
-            self.wfile.write(html.encode("utf-8"))
-
-        except Exception as e:
-            logging.error(f"Error serving feed article list {feed_name}: {e}")
-            self.send_error(500, "Internal server error")
-
-    def sanitize_feed_name(self, email_address):
-        """
-        Convert email address to sanitized feed name.
-
-        Args:
-            email_address (str): Email address (e.g., hello@mrdongnews.com)
-
-        Returns:
-            str: Sanitized feed name (e.g., hello_mrdongnews_com)
-        """
-        return email_address.replace("@", "_").replace(".", "_")
-
-    def send_security_headers(self):
-        """Send security-related HTTP headers."""
-        csp = "default-src 'self'; img-src * data:; style-src 'self' 'unsafe-inline'"
-        self.send_header("Content-Security-Policy", csp)
-        self.send_header("X-Content-Type-Options", "nosniff")
-        self.send_header("X-Frame-Options", "DENY")
-
-    def serve_static_file(self, filename):
-        """
-        Serve static assets from the static/ directory.
-
-        Args:
-            filename (str): Name of the static file to serve
-        """
-        try:
-            # Get the project root directory (parent of feed_server.py)
-            project_root = Path(__file__).parent
-            static_dir = project_root / "static"
-            file_path = static_dir / filename
-
-            # Security check: ensure file is within static directory
-            if not str(file_path.resolve()).startswith(str(static_dir.resolve())):
-                self.send_error(403, "Forbidden")
-                return
-
-            if not file_path.exists() or not file_path.is_file():
-                self.send_error(404, "File not found")
-                return
-
-            # Determine MIME type
-            mime_type, _ = mimetypes.guess_type(str(file_path))
-            if mime_type is None:
-                mime_type = "application/octet-stream"
-
-            # Read and serve file
-            with open(file_path, "rb") as f:
-                content = f.read()
-
-            self.send_response(200)
-            self.send_header("Content-type", mime_type)
-            self.send_header("Content-Length", str(len(content)))
-            self.send_security_headers()
-            self.end_headers()
-            self.wfile.write(content)
-
-        except Exception as e:
-            logging.error(f"Error serving static file {filename}: {e}")
-            self.send_error(500, "Internal server error")
-
-    def generate_article_html(self, subject, sender, date, content):
-        """
-        Generate HTML for article display.
-
-        Args:
-            subject (str): Email subject
-            sender (str): Sender email address
-            date (str): Email date
-            content (str): Email HTML content
-
-        Returns:
-            str: Complete HTML page
-        """
-        escaped_subject = html_module.escape(subject)
-        escaped_sender = html_module.escape(sender)
-        escaped_date = html_module.escape(date or '')
-        return f"""<!DOCTYPE html>
+def generate_article_html(subject: str, sender: str, date: str, content: str) -> str:
+    escaped_subject = html_module.escape(subject)
+    escaped_sender = html_module.escape(sender)
+    escaped_date = html_module.escape(date or "")
+    return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -339,76 +99,62 @@ class RSSRequestHandler(http.server.SimpleHTTPRequestHandler):
 </body>
 </html>"""
 
-    def generate_article_list_html(self, articles, senders=None, specific_sender=None):
+
+def generate_article_list_html(articles, senders=None, specific_sender=None) -> str:
+    if specific_sender:
+        escaped_sender = html_module.escape(specific_sender)
+        page_title = f"Articles from {escaped_sender}"
+        header_html = f"""
+            <header>
+                <h1>Articles from {escaped_sender}</h1>
+                <p class="meta">
+                    Total articles: {len(articles)} |
+                    <a href="/article" style="color: var(--link-color);">View all feeds</a>
+                </p>
+            </header>
         """
-        Generate HTML for article listing.
+    else:
+        total_articles = len(articles)
+        total_feeds = len(senders) if senders else 0
+        page_title = "All Articles"
 
-        Args:
-            articles (list): List of article dictionaries with metadata
-            senders (dict): Dictionary of sender statistics (for all feeds view)
-            specific_sender (str): Specific sender email (for single feed view)
+        feed_stats_html = ""
+        if senders:
+            feed_stats_html = "<div class='feed-stats'><h2>Feeds</h2><ul class='feed-list'>"
+            for sender, stats in sorted(senders.items(), key=lambda x: x[1]["latest"], reverse=True):
+                last_updated = stats["latest"].strftime("%Y-%m-%d %H:%M")
+                feed_stats_html += f"""
+                    <li>
+                        <a href="/article/{stats['feed_name']}">{html_module.escape(sender)}</a>
+                        <span class="meta">({stats['count']} articles, last updated: {last_updated})</span>
+                    </li>
+                """
+            feed_stats_html += "</ul></div>"
 
-        Returns:
-            str: Complete HTML page
+        header_html = f"""
+            <header>
+                <h1>All Articles</h1>
+                <p class="meta">Total feeds: {total_feeds} | Total articles: {total_articles}</p>
+            </header>
+            {feed_stats_html}
         """
-        # Build page title and header
-        if specific_sender:
-            escaped_sender = html_module.escape(specific_sender)
-            page_title = f"Articles from {escaped_sender}"
-            header_html = f"""
-                <header>
-                    <h1>Articles from {escaped_sender}</h1>
-                    <p class="meta">
-                        Total articles: {len(articles)} |
-                        <a href="/article" style="color: var(--link-color);">View all feeds</a>
-                    </p>
-                </header>
-            """
-        else:
-            total_articles = len(articles)
-            total_feeds = len(senders) if senders else 0
-            page_title = "All Articles"
 
-            # Build feed statistics
-            feed_stats_html = ""
-            if senders:
-                feed_stats_html = "<div class='feed-stats'><h2>Feeds</h2><ul class='feed-list'>"
-                for sender, stats in sorted(senders.items(), key=lambda x: x[1]["latest"], reverse=True):
-                    last_updated = stats['latest'].strftime('%Y-%m-%d %H:%M')
-                    feed_stats_html += f"""
-                        <li>
-                            <a href="/article/{stats['feed_name']}">{html_module.escape(sender)}</a>
-                            <span class="meta">({stats['count']} articles, last updated: {last_updated})</span>
-                        </li>
-                    """
-                feed_stats_html += "</ul></div>"
+    articles_html = "<div class='article-list'><h2>Recent Articles</h2><ul class='article-items'>"
+    for article in articles:
+        feed_name = sanitize_feed_name(article["sender"])
+        article_url = f"/article/{feed_name}/{article['guid']}"
+        articles_html += f"""
+            <li class='article-item'>
+                <a href="{article_url}" class='article-title'>{html_module.escape(article['subject'])}</a>
+                <div class="meta">
+                    From: <a href="/article/{feed_name}">{html_module.escape(article['sender'])}</a> |
+                    Date: {html_module.escape(article['date'] or '')}
+                </div>
+            </li>
+        """
+    articles_html += "</ul></div>"
 
-            header_html = f"""
-                <header>
-                    <h1>All Articles</h1>
-                    <p class="meta">Total feeds: {total_feeds} | Total articles: {total_articles}</p>
-                </header>
-                {feed_stats_html}
-            """
-
-        # Build article list
-        articles_html = "<div class='article-list'><h2>Recent Articles</h2><ul class='article-items'>"
-        for article in articles:
-            feed_name = self.sanitize_feed_name(article["sender"])
-            article_url = f"/article/{feed_name}/{article['guid']}"
-
-            articles_html += f"""
-                <li class='article-item'>
-                    <a href="{article_url}" class='article-title'>{html_module.escape(article['subject'])}</a>
-                    <div class="meta">
-                        From: <a href="/article/{feed_name}">{html_module.escape(article['sender'])}</a> |
-                        Date: {html_module.escape(article['date'] or '')}
-                    </div>
-                </li>
-            """
-        articles_html += "</ul></div>"
-
-        return f"""<!DOCTYPE html>
+    return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -416,65 +162,20 @@ class RSSRequestHandler(http.server.SimpleHTTPRequestHandler):
     <title>{page_title}</title>
     <link rel="stylesheet" href="/static/reader.css">
     <style>
-        .feed-stats {{
-            margin: 2rem 0;
-            padding: 1.5rem;
-            background-color: var(--code-bg);
-            border-radius: 8px;
-        }}
-        .feed-stats h2 {{
-            margin-bottom: 1rem;
-            font-size: 1.5rem;
-        }}
-        .feed-list {{
-            list-style: none;
-            padding: 0;
-        }}
-        .feed-list li {{
-            padding: 0.75rem 0;
-            border-bottom: 1px solid var(--border-color);
-        }}
-        .feed-list li:last-child {{
-            border-bottom: none;
-        }}
-        .feed-list a {{
-            color: var(--link-color);
-            text-decoration: none;
-            font-weight: 600;
-            font-size: 1.1rem;
-        }}
-        .feed-list a:hover {{
-            text-decoration: underline;
-        }}
-        .article-list {{
-            margin: 2rem 0;
-        }}
-        .article-list h2 {{
-            margin-bottom: 1rem;
-            font-size: 1.5rem;
-        }}
-        .article-items {{
-            list-style: none;
-            padding: 0;
-        }}
-        .article-item {{
-            padding: 1rem 0;
-            border-bottom: 1px solid var(--border-color);
-        }}
-        .article-item:last-child {{
-            border-bottom: none;
-        }}
-        .article-title {{
-            color: var(--link-color);
-            text-decoration: none;
-            font-weight: 600;
-            font-size: 1.2rem;
-            display: block;
-            margin-bottom: 0.5rem;
-        }}
-        .article-title:hover {{
-            text-decoration: underline;
-        }}
+        .feed-stats {{ margin: 2rem 0; padding: 1.5rem; background-color: var(--code-bg); border-radius: 8px; }}
+        .feed-stats h2 {{ margin-bottom: 1rem; font-size: 1.5rem; }}
+        .feed-list {{ list-style: none; padding: 0; }}
+        .feed-list li {{ padding: 0.75rem 0; border-bottom: 1px solid var(--border-color); }}
+        .feed-list li:last-child {{ border-bottom: none; }}
+        .feed-list a {{ color: var(--link-color); text-decoration: none; font-weight: 600; font-size: 1.1rem; }}
+        .feed-list a:hover {{ text-decoration: underline; }}
+        .article-list {{ margin: 2rem 0; }}
+        .article-list h2 {{ margin-bottom: 1rem; font-size: 1.5rem; }}
+        .article-items {{ list-style: none; padding: 0; }}
+        .article-item {{ padding: 1rem 0; border-bottom: 1px solid var(--border-color); }}
+        .article-item:last-child {{ border-bottom: none; }}
+        .article-title {{ color: var(--link-color); text-decoration: none; font-weight: 600; font-size: 1.2rem; display: block; margin-bottom: 0.5rem; }}
+        .article-title:hover {{ text-decoration: underline; }}
     </style>
 </head>
 <body>
@@ -485,76 +186,135 @@ class RSSRequestHandler(http.server.SimpleHTTPRequestHandler):
 </body>
 </html>"""
 
-    def log_message(self, format, *args):
-        """
-        Log an arbitrary message.
 
-        This is used by all other logging functions.
-        Override it to log messages to the logging module.
-        """
-        logging.info(f"{self.client_address[0]} - {format % args}")
-        
+def create_app() -> Flask:
+    app = Flask(
+        __name__,
+        static_folder=str(STATIC_DIR),
+        static_url_path="/static",
+    )
 
-def run(
-    server_class=http.server.HTTPServer,
-    handler_class=RSSRequestHandler,
-    directory="data/feed",
-    port=config.get("port"),
-    certfile=None,
-    keyfile=None,
-):
-    """
-    Run an HTTP server to serve static files from a specified directory.
+    @app.after_request
+    def _security_headers(response):
+        response.headers.setdefault(
+            "Content-Security-Policy",
+            "default-src 'self'; img-src * data:; style-src 'self' 'unsafe-inline'",
+        )
+        response.headers.setdefault("X-Content-Type-Options", "nosniff")
+        response.headers.setdefault("X-Frame-Options", "DENY")
+        return response
 
-    Args:
-        server_class (class): The HTTP server class to use. Defaults to http.server.HTTPServer.
-        handler_class (class): The request handler class to use.
-                               Defaults to SimpleHTTPRequestHandler.
-        directory (str): The directory from which to serve the static files.
-                         Defaults to "data/feed".
-        port (int): The port number on which to run the server. Defaults to 8000.
-    """
-    bind_address = config.get("bind_address", "127.0.0.1")
-    server_address = (bind_address, port)
+    @app.before_request
+    def _log_request():
+        from flask import request
+        safe_path = request.path.replace("\n", "").replace("\r", "")
+        logging.info(f"Serving ip={request.remote_addr} path={safe_path}")
 
-    # Create a partial function that initializes the handler with the directory
-    handler = functools.partial(handler_class, directory=directory)
+    @app.get("/health")
+    def health():
+        return jsonify({"status": "ok"})
 
-    httpd = server_class(server_address, handler)
+    @app.get("/stats")
+    def stats():
+        senders = db.get_senders()
+        return jsonify({
+            "total_emails": db.get_entry_count(),
+            "total_senders": len(senders),
+            "senders": senders,
+        })
 
-    # If certfile and keyfile are provided, run the server with SSL
-    if certfile and keyfile:
-        context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-        context.minimum_version = ssl.TLSVersion.TLSv1_2
-        context.load_cert_chain(certfile, keyfile)
-        httpd.socket = context.wrap_socket(httpd.socket, server_side=True)
+    @app.get("/article")
+    def article_list():
+        articles = db.get_all_emails_with_metadata()
+        senders: dict = {}
+        for article in articles:
+            sender = article["sender"]
+            if sender not in senders:
+                senders[sender] = {
+                    "count": 0,
+                    "latest": article["timestamp"],
+                    "feed_name": sanitize_feed_name(sender),
+                }
+            senders[sender]["count"] += 1
+            if article["timestamp"] > senders[sender]["latest"]:
+                senders[sender]["latest"] = article["timestamp"]
+        return generate_article_list_html(articles, senders, None)
 
-    logging.info(f"Serving {directory}/ to HTTP http://{bind_address}:{port}/")
-    httpd.serve_forever()
+    @app.get("/article/<feed_name>")
+    def feed_article_list(feed_name):
+        sender_email = feed_name_to_email(feed_name)
+        articles = db.get_emails_by_sender_with_metadata(sender_email)
+        if not articles:
+            abort(404)
+        return generate_article_list_html(articles, None, sender_email)
+
+    @app.get("/article/<feed_name>/<guid>")
+    def view_article(feed_name, guid):
+        sender_email = feed_name_to_email(feed_name)
+        try:
+            record = db.get_email_by_guid(sender_email, guid)
+            if not record:
+                abort(404)
+
+            msg = email_mod.message_from_bytes(record.content)
+            subject = str(email_mod.header.make_header(email_mod.header.decode_header(msg["subject"])))
+            date_text = msg["date"]
+            content = extract_article_content(msg)
+            return generate_article_html(subject, sender_email, date_text, content)
+        except Exception:
+            logging.exception(f"Error serving article {feed_name}/{guid}")
+            abort(500)
+
+    @app.get("/")
+    def index():
+        try:
+            entries = sorted(p.name for p in FEED_DIR.iterdir() if p.is_file() and not p.name.endswith(".db"))
+        except FileNotFoundError:
+            entries = []
+
+        items = "\n".join(f'<li><a href="/{html_module.escape(name)}">{html_module.escape(name)}</a></li>' for name in entries)
+        reader_link = '<p><a href="/article">Open internal reader</a></p>' if config.get("enable_internal_reader") else ""
+        return f"""<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><title>email2rss</title></head>
+<body>
+<h1>email2rss</h1>
+{reader_link}
+<ul>{items}</ul>
+</body></html>"""
+
+    @app.get("/<path:filename>")
+    def serve_feed_file(filename):
+        if filename.endswith(".db") or filename.startswith("."):
+            abort(404)
+        try:
+            return send_from_directory(str(FEED_DIR), filename)
+        except FileNotFoundError:
+            abort(404)
+
+    return app
+
+
+app = create_app()
 
 
 def main():
-    """
-    This function is the entry point of the program.
-    It creates a directory if it doesn't exist and starts the server.
-
-    Parameters:
-    - directory (str): The directory to serve the RSS feed from.
-    - port (int): The port number to run the server on.
-
-    Returns:
-    None
-    """
-    # configure logging
     logging.basicConfig(level=logging.INFO)
 
-    directory = os.path.join(config.get("data_dir"), "feed")
-    port = config.get("port")
+    FEED_DIR.mkdir(parents=True, exist_ok=True)
 
-    # Ensure the directory exists
-    if not os.path.exists(directory):
-        os.makedirs(directory)
-    run(directory=directory, port=port)
+    port = config.get("port")
+    bind_address = config.get("bind_address", "127.0.0.1")
+    certfile = os.getenv("certfile")
+    keyfile = os.getenv("keyfile")
+
+    ssl_context = None
+    if certfile and keyfile:
+        ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        ssl_context.minimum_version = ssl.TLSVersion.TLSv1_2
+        ssl_context.load_cert_chain(certfile, keyfile)
+
+    logging.info(f"Serving {FEED_DIR}/ on http://{bind_address}:{port}/")
+    app.run(host=bind_address, port=port, ssl_context=ssl_context, threaded=True)
 
 
 if __name__ == "__main__":

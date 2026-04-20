@@ -1,0 +1,42 @@
+name: Deploy
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+    inputs:
+      force:
+        description: Force rebuild (ignore layer cache)
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Join tailnet
+        uses: tailscale/github-action@306e68a486fd2350f2bfc3b19fcd143891a4a2d8 # v4.1.2
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:ci
+          version: latest
+
+      - name: Trigger Coolify deploy
+        env:
+          HOST: svc.1kko.com
+          UUID: ${{ secrets.COOLIFY_UUID }}
+          FORCE: ${{ inputs.force || false }}
+          TOKEN: ${{ secrets.COOLIFY_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          echo "Deploying (force=${FORCE})"
+          curl --fail-with-body --show-error --silent \
+               --max-time 30 \
+               -X GET "https://${HOST}/api/v1/deploy?uuid=${UUID}&force=${FORCE}" \
+               -H "Authorization: Bearer ${TOKEN}" \
+               -H "Accept: application/json"
+          echo
+          echo "Deploy request accepted."
