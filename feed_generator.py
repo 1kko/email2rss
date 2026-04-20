@@ -13,7 +13,8 @@ import email
 import email.header
 import hashlib
 import time
-import defusedxml.ElementTree as ET
+import xml.etree.ElementTree as ET
+from defusedxml.ElementTree import parse as safe_parse
 import datetime
 from pathlib import Path
 from urllib.parse import urljoin
@@ -277,8 +278,8 @@ def create_opml_from_files(
             # Set the RSS feed link
             xml_url = add_base_url(str(f"{rss_file.name}"))
 
-            # Parse XML from file
-            tree = ET.parse(rss_file)
+            # Parse XML from file (defused against XXE/entity attacks)
+            tree = safe_parse(rss_file)
             root = tree.getroot()
 
             # Find the feed title
