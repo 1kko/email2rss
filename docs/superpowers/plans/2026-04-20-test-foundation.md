@@ -628,8 +628,9 @@ def test_article_route_renders_email_body(client, db_session, monkeypatch):
     monkeypatch.setitem(feed_server.config, "enable_internal_reader", True)
     subject = "Hello from the test suite"
     date_str = "Mon, 13 Apr 2026 10:00:00 +0000"
-    from_header = "Sender Name <sender@example.com>"
-    guid = _expected_guid(subject, date_str, from_header)
+    sender = "sender@example.com"
+    # insert_email rewrites From to the bare sender address; GUID matches that
+    guid = _expected_guid(subject, date_str, sender)
 
     insert_email(db_session, email_id=1)
 
