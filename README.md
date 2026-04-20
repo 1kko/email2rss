@@ -256,6 +256,23 @@ If CSS/JS files aren't loading with the internal reader:
 
 The SQLite database and RSS feeds are stored in the `data/` directory by default. When running in Docker, mount this directory as a volume to persist data between container restarts.
 
+## Development
+
+Install with dev dependencies and run the test suite:
+
+```bash
+pip install -e '.[test]'
+pytest
+```
+
+Lint:
+
+```bash
+ruff check .
+```
+
+CI (GitHub Actions) runs lint, tests, and docker builds on every push and pull request to `master`.
+
 ## License
 
 MIT
