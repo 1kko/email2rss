@@ -64,3 +64,54 @@ def test_connect_to_gmail_applies_exponential_backoff(fake_imap, monkeypatch):
 
     # Expect sleeps of 1, 2, 4 between the 4 attempts (no sleep before the first)
     assert sleep_calls == [1, 2, 4]
+
+
+def _mime_bytes(subject, sender="s@example.com", date_str="Mon, 13 Apr 2026 10:00:00 +0000"):
+    return (
+        f"From: {sender}\r\n"
+        f"To: user@localhost\r\n"
+        f"Subject: {subject}\r\n"
+        f"Date: {date_str}\r\n"
+        f"MIME-Version: 1.0\r\n"
+        f"Content-Type: text/plain; charset=utf-8\r\n\r\n"
+        f"body for {subject}\r\n"
+    ).encode("utf-8")
+
+
+def test_fetch_emails_continues_past_malformed_email(db_session):
+    """Malformed Date header on the middle message — other 2 still saved."""
+    mail = MagicMock()
+    mail.search.return_value = (None, [b"1 2 3"])
+    good_a = _mime_bytes("A", date_str="Mon, 13 Apr 2026 10:00:00 +0000")
+    # Mid email has a Date header that parsedate_to_datetime can't parse
+    bad = _mime_bytes("B", date_str="not-a-real-date")
+    good_c = _mime_bytes("C", date_str="Mon, 15 Apr 2026 10:00:00 +0000")
+    mail.fetch.side_effect = [
+        (None, [(b"1 (RFC822 {len})", good_a)]),
+        (None, [(b"2 (RFC822 {len})", bad)]),
+        (None, [(b"3 (RFC822 {len})", good_c)]),
+    ]
+
+    email_fetcher.fetch_emails(mail, since=10)
+
+    # 2 of 3 survive (A and C). B's unparseable date trips parsedate_to_datetime.
+    import database as db
+    assert db.get_entry_count() == 2
+
+
+def test_fetch_emails_aborts_on_imap_error(db_session):
+    """IMAP-level error on message 2 propagates; message 1 is saved, 3 is not."""
+    mail = MagicMock()
+    mail.search.return_value = (None, [b"1 2 3"])
+    good_a = _mime_bytes("A")
+    mail.fetch.side_effect = [
+        (None, [(b"1 (RFC822 {len})", good_a)]),
+        imaplib.IMAP4.error("connection dropped"),
+        # 3rd call should never happen
+    ]
+
+    with pytest.raises(imaplib.IMAP4.error, match="connection dropped"):
+        email_fetcher.fetch_emails(mail, since=10)
+
+    import database as db
+    assert db.get_entry_count() == 1  # only A landed
