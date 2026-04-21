@@ -459,3 +459,82 @@ def test_backfill_preview_images_populates_existing_rows(db_session):
 
     row = db_session.query(db.Email).filter_by(email_id=4).first()
     assert row.preview_image_url == "http://x.com/pic.jpg"
+
+
+def test_get_landing_data_empty_db(db_session):
+    data = db.get_landing_data(latest_limit=10, per_sender_limit=10)
+    assert data == {"latest": [], "rows": []}
+
+
+def test_get_landing_data_returns_latest_and_rows(db_session):
+    # alice: 2 articles. bob: 1 article.
+    insert_email(db_session, email_id=1, sender="alice@example.com",
+                 timestamp=datetime.datetime(2026, 4, 10))
+    insert_email(db_session, email_id=2, sender="alice@example.com",
+                 timestamp=datetime.datetime(2026, 4, 15))
+    insert_email(db_session, email_id=3, sender="bob@example.com",
+                 timestamp=datetime.datetime(2026, 4, 12))
+
+    data = db.get_landing_data(latest_limit=10, per_sender_limit=10)
+    assert len(data["latest"]) == 3
+    # Latest ordered by timestamp desc
+    assert data["latest"][0]["sender"] == "alice@example.com"  # 2026-04-15
+    assert data["latest"][1]["sender"] == "bob@example.com"    # 2026-04-12
+    assert data["latest"][2]["sender"] == "alice@example.com"  # 2026-04-10
+
+    # Rows ordered by each sender's newest article desc — alice (04-15) before bob (04-12)
+    assert [r["sender"] for r in data["rows"]] == ["alice@example.com", "bob@example.com"]
+    alice_row = data["rows"][0]
+    bob_row = data["rows"][1]
+    assert alice_row["article_count"] == 2
+    assert bob_row["article_count"] == 1
+    # Per-row articles sorted newest-first
+    assert len(alice_row["articles"]) == 2
+    assert alice_row["articles"][0]["sender"] == "alice@example.com"
+
+
+def test_get_landing_data_limits_latest(db_session):
+    for i in range(15):
+        insert_email(db_session, email_id=i,
+                     timestamp=datetime.datetime(2026, 4, 10) + datetime.timedelta(hours=i))
+    data = db.get_landing_data(latest_limit=5, per_sender_limit=10)
+    assert len(data["latest"]) == 5
+
+
+def test_get_landing_data_limits_per_sender(db_session):
+    for i in range(15):
+        insert_email(db_session, email_id=i, sender="alice@example.com",
+                     timestamp=datetime.datetime(2026, 4, 10) + datetime.timedelta(hours=i))
+    data = db.get_landing_data(latest_limit=10, per_sender_limit=5)
+    assert data["rows"][0]["article_count"] == 15
+    assert len(data["rows"][0]["articles"]) == 5
+
+
+def test_get_landing_data_includes_favicon_and_monogram(db_session):
+    insert_email(db_session, email_id=1, sender="alice@example.com")
+    data = db.get_landing_data()
+    row = data["rows"][0]
+    assert row["favicon_url"]  # non-empty signed URL
+    assert row["monogram_letter"] == "A"
+    assert 0 <= row["monogram_hue"] < 360
+
+
+def test_get_landing_data_signs_preview_urls(db_session):
+    """preview_image_url values flow through img_proxy.sign_url — each card's
+    image_url should start with the /img? prefix, not be the bare remote URL."""
+    content = (
+        b"From: s@example.com\r\n"
+        b"Subject: t\r\n"
+        b"MIME-Version: 1.0\r\n"
+        b"Content-Type: text/html; charset=utf-8\r\n\r\n"
+        b'<img src="http://cdn.example.com/hero.jpg" width="600" height="400">'
+    )
+    db.save_email(
+        sender="s@example.com", receiver="me@localhost", email_id=1,
+        subject="t", content=content, timestamp=datetime.datetime(2026, 4, 13),
+    )
+    data = db.get_landing_data()
+    article = data["latest"][0]
+    assert article["image_url"]
+    assert "/img?u=" in article["image_url"]
+    assert "&sig=" in article["image_url"]
