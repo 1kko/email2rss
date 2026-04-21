@@ -216,3 +216,154 @@ def test_main_aborts_when_reader_enabled_without_baseurl(monkeypatch):
 
     with pytest.raises(RuntimeError, match="server_baseurl"):
         feed_server.main()
+
+
+def _guid_for_default_fixture():
+    """Compute the GUID for insert_email's default values."""
+    import hashlib
+    return hashlib.md5(
+        ("Hello from the test suite"
+         + "Mon, 13 Apr 2026 10:00:00 +0000"
+         + "sender@example.com").encode(),
+        usedforsecurity=False,
+    ).hexdigest()
+
+
+def test_mark_read_route_sets_flag(client, db_session):
+    from tests.conftest import insert_email
+    row = insert_email(db_session, email_id=1)
+    guid = _guid_for_default_fixture()
+
+    resp = client.post(f"/article/sender_example_com/{guid}/read")
+    assert resp.status_code == 200
+    assert resp.get_json() == {"is_read": True}
+
+    refreshed = db_session.query(feed_server.db.Email).filter_by(id=row.id).one()
+    assert refreshed.is_read is True
+
+
+def test_unmark_read_route_clears_flag(client, db_session):
+    from tests.conftest import insert_email
+    row = insert_email(db_session, email_id=1)
+    feed_server.db.mark_read(row.id, True)
+    guid = _guid_for_default_fixture()
+
+    resp = client.delete(f"/article/sender_example_com/{guid}/read")
+    assert resp.status_code == 200
+    assert resp.get_json() == {"is_read": False}
+
+
+def test_star_route_sets_flag(client, db_session):
+    from tests.conftest import insert_email
+    insert_email(db_session, email_id=1)
+    guid = _guid_for_default_fixture()
+
+    resp = client.post(f"/article/sender_example_com/{guid}/star")
+    assert resp.status_code == 200
+    assert resp.get_json() == {"is_starred": True}
+
+
+def test_unstar_route_clears_flag(client, db_session):
+    from tests.conftest import insert_email
+    row = insert_email(db_session, email_id=1)
+    feed_server.db.mark_starred(row.id, True)
+    guid = _guid_for_default_fixture()
+
+    resp = client.delete(f"/article/sender_example_com/{guid}/star")
+    assert resp.status_code == 200
+    assert resp.get_json() == {"is_starred": False}
+
+
+def test_mark_read_route_404s_for_unknown_guid(client, db_session):
+    from tests.conftest import insert_email
+    insert_email(db_session, email_id=1)
+    resp = client.post("/article/sender_example_com/nonexistentguid123/read")
+    assert resp.status_code == 404
+
+
+def test_star_route_rejects_cross_origin(client, db_session, monkeypatch):
+    from tests.conftest import insert_email
+    insert_email(db_session, email_id=1)
+    guid = _guid_for_default_fixture()
+
+    monkeypatch.setitem(feed_server.config, "server_baseurl", "http://testserver")
+
+    resp = client.post(
+        f"/article/sender_example_com/{guid}/star",
+        headers={"Origin": "https://evil.example"},
+    )
+    assert resp.status_code == 403
+
+
+def test_star_route_allows_missing_origin(client, db_session):
+    """No Origin header (e.g. curl) is allowed through."""
+    from tests.conftest import insert_email
+    insert_email(db_session, email_id=1)
+    guid = _guid_for_default_fixture()
+
+    resp = client.post(f"/article/sender_example_com/{guid}/star")
+    assert resp.status_code == 200
+
+
+def test_article_list_filter_unread(client, db_session):
+    from tests.conftest import insert_email
+    a = insert_email(db_session, email_id=1, sender="s@example.com")
+    _b = insert_email(db_session, email_id=2, sender="s@example.com")
+    feed_server.db.mark_read(a.id, True)  # a is read
+
+    resp = client.get("/article?filter=unread")
+    assert resp.status_code == 200
+    body = resp.data.decode("utf-8")
+    # Unread list should contain b but not a
+    assert body.count('class="unread"') == 1  # one row with unread class
+
+
+def test_article_list_filter_starred(client, db_session):
+    from tests.conftest import insert_email
+    _a = insert_email(db_session, email_id=1, sender="s@example.com")
+    b = insert_email(db_session, email_id=2, sender="s@example.com")
+    feed_server.db.mark_starred(b.id, True)
+
+    resp = client.get("/article?filter=starred")
+    assert resp.status_code == 200
+    body = resp.data.decode("utf-8")
+    # Only one row should appear (the starred one)
+    assert body.count("<li ") == 1   # <li class="..." ...>
+
+
+def test_article_list_default_filter_is_all(client, db_session):
+    from tests.conftest import insert_email
+    insert_email(db_session, email_id=1)
+    insert_email(db_session, email_id=2)
+
+    resp = client.get("/article")  # no filter param
+    body = resp.data.decode("utf-8")
+    # Both rows present
+    assert body.count("<li ") == 2
+
+
+def test_search_route_returns_results(client, db_session):
+    feed_server.db.save_email(
+        sender="s@example.com", receiver="me@localhost", email_id=100,
+        subject="ThirdQuarterFinancials",
+        content=b"From: s@example.com\nSubject: ThirdQuarterFinancials\n\nreport body",
+        timestamp=__import__("datetime").datetime(2026, 4, 13),
+    )
+
+    resp = client.get("/search?q=ThirdQuarterFinancials")
+    assert resp.status_code == 200
+    assert b"ThirdQuarterFinancials" in resp.data
+
+
+def test_search_route_empty_query_renders_prompt(client, db_session):
+    resp = client.get("/search")
+    assert resp.status_code == 200
+    body = resp.data.decode("utf-8")
+    assert "Enter a query" in body or "search box above" in body
+
+
+def test_search_route_invalid_query_renders_error(client, db_session):
+    resp = client.get("/search?q=AND%20AND%20AND")
+    assert resp.status_code == 200
+    body = resp.data.decode("utf-8")
+    assert "Search error" in body or "error" in body.lower()

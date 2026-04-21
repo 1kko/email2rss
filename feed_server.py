@@ -80,41 +80,69 @@ def create_app() -> Flask:
 
     @app.get("/article")
     def article_list():
-        articles_raw = db.get_all_emails_with_metadata()
+        filter_mode = request.args.get("filter", "all")
+        if filter_mode not in ("all", "unread", "starred"):
+            abort(400)
+        articles = db.get_emails_filtered(
+            sender=None, filter_mode=filter_mode, limit=config.get("max_item_per_feed", 100) * 10
+        )
+        # Group by sender for the sidebar
         senders: dict = {}
-        for article in articles_raw:
-            sender = article["sender"]
-            if sender not in senders:
-                senders[sender] = {
-                    "count": 0,
-                    "latest": article["timestamp"],
-                    "feed_name": sanitize_feed_name(sender),
-                }
-            senders[sender]["count"] += 1
-            if article["timestamp"] > senders[sender]["latest"]:
-                senders[sender]["latest"] = article["timestamp"]
-
+        for article in articles:
+            s = article["sender"]
+            if s not in senders:
+                senders[s] = {"count": 0, "latest": article["timestamp"], "feed_name": article["feed_name"]}
+            senders[s]["count"] += 1
+            if article["timestamp"] > senders[s]["latest"]:
+                senders[s]["latest"] = article["timestamp"]
         sorted_senders = sorted(senders.items(), key=lambda x: x[1]["latest"], reverse=True)
+
         return render_template(
             "article_list.html",
             page_title="All Articles",
-            articles=_attach_feed_names(articles_raw),
+            articles=articles,
             senders=sorted_senders,
             specific_sender=None,
+            filter_mode=filter_mode,
         )
 
     @app.get("/article/<feed_name>")
     def feed_article_list(feed_name):
         sender_email = feed_name_to_email(feed_name)
-        articles_raw = db.get_emails_by_sender_with_metadata(sender_email)
-        if not articles_raw:
+        filter_mode = request.args.get("filter", "all")
+        if filter_mode not in ("all", "unread", "starred"):
+            abort(400)
+        articles = db.get_emails_filtered(
+            sender=sender_email, filter_mode=filter_mode,
+            limit=config.get("max_item_per_feed", 100),
+        )
+        if not articles and filter_mode == "all":
             abort(404)
         return render_template(
             "article_list.html",
             page_title=f"Articles from {sender_email}",
-            articles=_attach_feed_names(articles_raw),
+            articles=articles,
             senders=None,
             specific_sender=sender_email,
+            filter_mode=filter_mode,
+        )
+
+    @app.get("/search")
+    def search():
+        query = request.args.get("q", "").strip()
+        error = None
+        results = []
+        if query:
+            try:
+                results = db.search_emails(query, limit=50)
+            except db.SearchSyntaxError as e:
+                error = str(e)
+        return render_template(
+            "search_results.html",
+            query=query,
+            results=results,
+            error=error,
+            search_q=query,
         )
 
     @app.get("/article/<feed_name>/<guid>")
@@ -141,18 +169,75 @@ def create_app() -> Flask:
             cleaned = reader.clean_and_rewrite(body_html, cid_map, _sign)
             iframe_document = reader.render_iframe_document(cleaned, proxy_origin)
 
+            # State attributes are already loaded on `record` (eager via get_email_by_guid's .all())
+            is_read = record.is_read
+            is_starred = record.is_starred
+
             return render_template(
                 "article.html",
                 subject=subject,
                 sender=sender_email,
                 date=msg["date"] or "",
                 iframe_document=iframe_document,
+                feed_name=feed_name,
+                guid=guid,
+                is_read=is_read,
+                is_starred=is_starred,
+                read_after_seconds=config.get("read_after_seconds", 5),
             )
         except HTTPException:
             raise
         except Exception:
             logging.exception(f"Error serving article {feed_name}/{guid}")
             abort(500)
+
+    def _assert_same_origin():
+        origin = request.headers.get("Origin")
+        if not origin:
+            return  # absent means non-browser caller (curl, test client) — allow
+        baseurl = (config.get("server_baseurl") or "").rstrip("/")
+        if baseurl and origin != baseurl:
+            abort(403)
+
+    @app.post("/article/<feed_name>/<guid>/read")
+    def mark_article_read(feed_name, guid):
+        _assert_same_origin()
+        sender_email = feed_name_to_email(feed_name)
+        record = db.get_email_by_guid(sender_email, guid)
+        if not record:
+            abort(404)
+        db.mark_read(record.id, True)
+        return jsonify({"is_read": True})
+
+    @app.delete("/article/<feed_name>/<guid>/read")
+    def unmark_article_read(feed_name, guid):
+        _assert_same_origin()
+        sender_email = feed_name_to_email(feed_name)
+        record = db.get_email_by_guid(sender_email, guid)
+        if not record:
+            abort(404)
+        db.mark_read(record.id, False)
+        return jsonify({"is_read": False})
+
+    @app.post("/article/<feed_name>/<guid>/star")
+    def mark_article_starred(feed_name, guid):
+        _assert_same_origin()
+        sender_email = feed_name_to_email(feed_name)
+        record = db.get_email_by_guid(sender_email, guid)
+        if not record:
+            abort(404)
+        db.mark_starred(record.id, True)
+        return jsonify({"is_starred": True})
+
+    @app.delete("/article/<feed_name>/<guid>/star")
+    def unmark_article_starred(feed_name, guid):
+        _assert_same_origin()
+        sender_email = feed_name_to_email(feed_name)
+        record = db.get_email_by_guid(sender_email, guid)
+        if not record:
+            abort(404)
+        db.mark_starred(record.id, False)
+        return jsonify({"is_starred": False})
 
     @app.get("/")
     def index():
