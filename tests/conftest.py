@@ -68,18 +68,43 @@ def db_session(monkeypatch):
     from `database`) transparently uses the test DB.
     """
     engine = create_engine("sqlite:///:memory:")
-    SessionLocal = sessionmaker(bind=engine)
+    _factory = sessionmaker(bind=engine)
     database.Base.metadata.create_all(engine)
 
     monkeypatch.setattr(database, "engine", engine)
-    monkeypatch.setattr(database, "Session", SessionLocal)
 
     # Set up FTS virtual table + delete trigger in the test engine
     with engine.connect() as conn:
         database._setup_fts(conn)
         conn.commit()
 
-    session = SessionLocal()
+    session = _factory()
+
+    # Expose a session factory that always returns *this* session so that
+    # helpers (mark_read, mark_starred, …) operate on the same unit-of-work
+    # as the test.  The factory is callable (matching production Session usage)
+    # and the returned object supports the context-manager protocol used by
+    # `with Session() as s:` without closing the underlying session.
+    class _SameSessionFactory:
+        """Always returns `session`; context-manager exit is a no-op."""
+
+        def __call__(self):
+            return self
+
+        def __enter__(self):
+            return session
+
+        def __exit__(self, *args):
+            # Do NOT close — the test fixture owns the session lifetime.
+            return False
+
+        # Delegate everything else to `session` so callers that do
+        # `Session().query(...)` without a `with` block also work.
+        def __getattr__(self, name):
+            return getattr(session, name)
+
+    monkeypatch.setattr(database, "Session", _SameSessionFactory())
+
     try:
         yield session
     finally:
