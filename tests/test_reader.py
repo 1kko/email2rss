@@ -83,10 +83,15 @@ def _identity_sign(url: str) -> str:
 
 
 def test_clean_drops_script_tag():
+    """bleach strip=True removes <script> tags but keeps the inner text as inert
+    text nodes. That's safe inside our sandboxed iframe (default-src 'none',
+    no allow-scripts) but we pin the behavior here so a regression that lets the
+    <script> element itself leak back would fail."""
     out = reader.clean_and_rewrite("<p>ok</p><script>evil()</script>", {}, _identity_sign)
-    # bleach strips the <script> tag but keeps inner text as inert text node
     assert "<script" not in out.lower()
-    assert "</script>" not in out.lower()
+    assert "</script" not in out.lower()
+    # The text "evil()" survives as inert text; that is bleach's documented behavior.
+    assert "evil()" in out
     assert "<p>ok</p>" in out
 
 
@@ -160,11 +165,39 @@ def test_clean_drops_svg_tag():
 
 
 def test_clean_survives_malformed_html():
+    """Unclosed tags, bare attr values — bleach + html5lib normalize and strip
+    the dangerous <script>. Inner text may survive as inert text (see note in
+    test_clean_drops_script_tag)."""
     malformed = '<p>unclosed<img src=http://x.com/y.png><script>evil'
     out = reader.clean_and_rewrite(malformed, {}, _identity_sign)
-    # bleach strips <script> tags; inner text becomes inert text node
     assert "<script" not in out.lower()
-    assert "</script>" not in out.lower()
+    assert "</script" not in out.lower()
+
+
+def test_clean_drops_data_uri_href():
+    """data: URIs are not in ALLOWED_PROTOCOLS; href is stripped from the anchor."""
+    out = reader.clean_and_rewrite(
+        '<a href="data:text/html,<script>xss</script>">click</a>', {}, _identity_sign
+    )
+    assert "data:text/html" not in out
+    assert "click" in out  # link text preserved even if href stripped
+
+
+def test_clean_drops_cid_href():
+    """cid: URIs on anchors are not in ALLOWED_PROTOCOLS."""
+    out = reader.clean_and_rewrite('<a href="cid:foo">click</a>', {}, _identity_sign)
+    assert "cid:foo" not in out
+    assert "click" in out
+
+
+def test_clean_handles_empty_string():
+    assert reader.clean_and_rewrite("", {}, _identity_sign) == ""
+
+
+def test_clean_handles_uppercase_http_scheme():
+    """Scheme matching is case-insensitive per RFC 3986."""
+    out = reader.clean_and_rewrite('<img src="HTTPS://cdn.example.com/x.png">', {}, _identity_sign)
+    assert 'src="SIGN:HTTPS://cdn.example.com/x.png"' in out
 
 
 def test_render_iframe_document_includes_csp_and_body():

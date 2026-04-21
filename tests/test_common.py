@@ -56,3 +56,19 @@ def test_img_proxy_secret_env_override_wins(tmp_path, monkeypatch):
     assert common.get_img_proxy_secret() == b"fixed-test-secret"
     # File not created when env var set
     assert not (tmp_path / "img_proxy_secret").exists()
+
+
+def test_validate_reader_config_rejects_baseurl_with_semicolon(monkeypatch):
+    import common
+    monkeypatch.setitem(common.config, "enable_internal_reader", True)
+    monkeypatch.setitem(common.config, "server_baseurl", "http://x; script-src *")
+    with pytest.raises(RuntimeError, match="illegal characters"):
+        common.validate_reader_config()
+
+
+def test_validate_reader_config_rejects_baseurl_without_scheme(monkeypatch):
+    import common
+    monkeypatch.setitem(common.config, "enable_internal_reader", True)
+    monkeypatch.setitem(common.config, "server_baseurl", "localhost:8000")
+    with pytest.raises(RuntimeError, match="http://"):
+        common.validate_reader_config()
