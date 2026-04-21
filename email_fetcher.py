@@ -159,7 +159,8 @@ def main():
     # Retention purge — runs before the fetch so we don't delete just-fetched rows
     retention_days = config.get("retention_days")
     if retention_days:
-        cutoff = datetime.datetime.utcnow() - datetime.timedelta(days=retention_days)
+        now_naive = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
+        cutoff = now_naive - datetime.timedelta(days=retention_days)
         deleted = db.delete_emails_older_than(cutoff)
         if deleted:
             logging.info(f"Retention: purged {deleted} emails older than {retention_days} days.")

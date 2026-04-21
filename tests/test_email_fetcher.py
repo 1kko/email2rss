@@ -139,7 +139,7 @@ def test_main_calls_purge_when_retention_days_set(monkeypatch, fake_imap, db_ses
 
     assert len(delete_calls) == 1
     cutoff = delete_calls[0]
-    expected = datetime.datetime.utcnow() - datetime.timedelta(days=7)
+    expected = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None) - datetime.timedelta(days=7)
     # Cutoff should be within 1 minute of expected
     assert abs((cutoff - expected).total_seconds()) < 60
 
