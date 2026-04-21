@@ -352,3 +352,39 @@ def test_extract_preview_image_falls_back_to_first_when_no_dimensions():
         '<img src="http://x.com/second.png">'
     )
     assert reader.extract_preview_image(msg) == "http://x.com/first.png"
+
+
+def test_extract_preview_image_skips_banner_shaped_when_hero_exists():
+    """Newsletter masthead (600x100, 6:1) is wider than 3.5:1 → skip in favor of hero."""
+    msg = _make_html_msg(
+        '<img src="http://x.com/masthead.png" width="600" height="100">'
+        '<img src="http://x.com/hero.jpg" width="500" height="350">'
+    )
+    # Masthead has larger area (60000) but banner-shaped; hero wins.
+    assert reader.extract_preview_image(msg) == "http://x.com/hero.jpg"
+
+
+def test_extract_preview_image_falls_back_to_banner_when_its_the_only_option():
+    """If every candidate is banner-shaped, take the largest banner — better than None."""
+    msg = _make_html_msg(
+        '<img src="http://x.com/banner-a.png" width="600" height="100">'
+        '<img src="http://x.com/banner-b.png" width="800" height="120">'
+    )
+    assert reader.extract_preview_image(msg) == "http://x.com/banner-b.png"
+
+
+def test_extract_preview_image_does_not_flag_moderately_wide_content():
+    """4:3 or 16:9 hero (≤ 3.5:1) is NOT a banner — must still win over a small image."""
+    msg = _make_html_msg(
+        '<img src="http://x.com/thumb.jpg" width="100" height="100">'
+        '<img src="http://x.com/wide-hero.jpg" width="1600" height="900">'  # 16:9 ≈ 1.78
+    )
+    assert reader.extract_preview_image(msg) == "http://x.com/wide-hero.jpg"
+
+
+def test_extract_preview_image_does_not_flag_tall_images_as_banner():
+    """Tall portrait (1:3) should NOT be treated as banner — ratio test is one-sided."""
+    msg = _make_html_msg(
+        '<img src="http://x.com/portrait.jpg" width="400" height="1200">'
+    )
+    assert reader.extract_preview_image(msg) == "http://x.com/portrait.jpg"
