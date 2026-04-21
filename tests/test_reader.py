@@ -243,3 +243,74 @@ def test_render_iframe_document_includes_csp_and_body():
     assert "img-src http://localhost:8000 data:" in doc
     assert '<base target="_blank">' in doc
     assert "<p>hi</p>" in doc
+
+
+def _make_html_msg(html_body: str, sender="s@example.com"):
+    """Build a simple text/html MIME message for tests."""
+    import email as email_mod
+    raw = (
+        f"From: {sender}\r\n"
+        f"To: me@localhost\r\n"
+        f"Subject: test\r\n"
+        f"MIME-Version: 1.0\r\n"
+        f"Content-Type: text/html; charset=utf-8\r\n\r\n"
+        f"{html_body}\r\n"
+    ).encode("utf-8")
+    return email_mod.message_from_bytes(raw)
+
+
+def test_extract_preview_image_picks_first_large_image():
+    msg = _make_html_msg(
+        '<p>hi</p>'
+        '<img src="http://cdn.example.com/hero.jpg" width="600" height="400">'
+        '<img src="http://cdn.example.com/later.jpg" width="400" height="300">'
+    )
+    assert reader.extract_preview_image(msg) == "http://cdn.example.com/hero.jpg"
+
+
+def test_extract_preview_image_skips_1x1_tracking_pixel():
+    msg = _make_html_msg(
+        '<img src="http://track.example.com/open.gif" width="1" height="1">'
+        '<img src="http://cdn.example.com/real.jpg" width="600" height="400">'
+    )
+    assert reader.extract_preview_image(msg) == "http://cdn.example.com/real.jpg"
+
+
+def test_extract_preview_image_skips_tracking_filename_hints():
+    msg = _make_html_msg(
+        '<img src="http://x.com/pixel.gif" width="600" height="1">'
+        '<img src="http://x.com/tracking-beacon.png">'
+        '<img src="http://x.com/hero.png" width="600" height="400">'
+    )
+    assert reader.extract_preview_image(msg) == "http://x.com/hero.png"
+
+
+def test_extract_preview_image_skips_cid_and_data():
+    msg = _make_html_msg(
+        '<img src="cid:foo123" width="600" height="400">'
+        '<img src="data:image/png;base64,AAAA" width="600" height="400">'
+        '<img src="https://x.com/hero.jpg" width="600" height="400">'
+    )
+    assert reader.extract_preview_image(msg) == "https://x.com/hero.jpg"
+
+
+def test_extract_preview_image_normalizes_protocol_relative_to_https():
+    msg = _make_html_msg('<img src="//cdn.example.com/h.png" width="600" height="400">')
+    assert reader.extract_preview_image(msg) == "https://cdn.example.com/h.png"
+
+
+def test_extract_preview_image_returns_none_when_no_images():
+    msg = _make_html_msg('<p>no images here</p>')
+    assert reader.extract_preview_image(msg) is None
+
+
+def test_extract_preview_image_skips_small_declared_dimensions():
+    # Both dims declared and below threshold → skip
+    msg = _make_html_msg('<img src="http://x.com/tiny.png" width="20" height="20">')
+    assert reader.extract_preview_image(msg) is None
+
+
+def test_extract_preview_image_accepts_image_without_declared_dimensions():
+    # No width/height attributes → we can't verify size, accept it
+    msg = _make_html_msg('<img src="http://x.com/maybe.png">')
+    assert reader.extract_preview_image(msg) == "http://x.com/maybe.png"

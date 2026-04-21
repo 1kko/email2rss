@@ -268,3 +268,93 @@ def extract_plain_text(msg) -> str:
     # If body_html is actually plain text wrapped in <pre>, strip the <pre> wrapper
     # by running bleach with no allowed tags — bleach strips all markup.
     return bleach.clean(body_html, tags=[], strip=True)
+
+
+_TRACKING_FILENAME_HINTS = ("pixel", "track", "open", "beacon", "spacer")
+_MIN_IMAGE_PX = 50
+
+
+def extract_preview_image(msg) -> str | None:
+    """
+    Walk the MIME message's HTML body and return the first "usable" <img> URL,
+    or None. Used for landing-page thumbnails.
+
+    Rules for "usable":
+    - src starts with http://, https://, or // (protocol-relative → https:)
+    - cid: and data: skipped (can't be re-served via the /img proxy from a list)
+    - width=1 or height=1 skipped (tracking pixel)
+    - filename containing pixel/track/open/beacon/spacer skipped (case-insensitive)
+    - if width and height attributes are both declared, both must be >= 50
+    - otherwise accepted
+    """
+    import re
+
+    body_html, _cid_map = extract_body_and_cid_map(msg)
+    if not body_html:
+        return None
+
+    # Find all <img ...> tags. We keep the regex narrow: we only inspect src/width/height.
+    # A full HTML parse is overkill for this single-field extraction.
+    for match in re.finditer(r'<img\b([^>]*)>', body_html, flags=re.IGNORECASE):
+        attrs_str = match.group(1)
+        src = _attr(attrs_str, "src")
+        if not src:
+            continue
+        src = src.strip()
+        lower_src = src.lower()
+
+        # Skip unsupported schemes
+        if lower_src.startswith("cid:") or lower_src.startswith("data:"):
+            continue
+
+        # Normalize protocol-relative
+        if src.startswith("//"):
+            src = "https:" + src
+            lower_src = src.lower()
+
+        if not (lower_src.startswith("http://") or lower_src.startswith("https://")):
+            continue
+
+        # Filename hint filter
+        fname = lower_src.rsplit("/", 1)[-1]
+        if any(hint in fname for hint in _TRACKING_FILENAME_HINTS):
+            continue
+
+        width = _attr_int(attrs_str, "width")
+        height = _attr_int(attrs_str, "height")
+
+        # 1x1 tracking pixel
+        if width == 1 or height == 1:
+            continue
+
+        # If both declared and either is below threshold, skip
+        if width is not None and height is not None:
+            if width < _MIN_IMAGE_PX or height < _MIN_IMAGE_PX:
+                continue
+
+        return src
+
+    return None
+
+
+def _attr(attrs_str: str, name: str) -> str | None:
+    """Extract an attribute value from an HTML tag's attribute substring."""
+    import re
+    m = re.search(
+        rf'\b{re.escape(name)}\s*=\s*(?:"([^"]*)"|\'([^\']*)\'|([^\s>]+))',
+        attrs_str,
+        flags=re.IGNORECASE,
+    )
+    if not m:
+        return None
+    return m.group(1) or m.group(2) or m.group(3)
+
+
+def _attr_int(attrs_str: str, name: str) -> int | None:
+    v = _attr(attrs_str, name)
+    if v is None:
+        return None
+    try:
+        return int(v.strip().rstrip("px"))
+    except ValueError:
+        return None

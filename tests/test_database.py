@@ -358,3 +358,68 @@ def test_fts_subject_is_html_escaped(db_session):
     # Search still finds it via the distinctive token
     results = db.search_emails("XssProbeToken")
     assert len(results) == 1
+
+
+def test_email_model_has_preview_image_url_column(db_session):
+    """Fresh in-memory DB should have the new column, default None."""
+    insert_email(db_session, email_id=1)
+    row = db_session.query(db.Email).filter_by(email_id=1).first()
+    assert row.preview_image_url is None
+
+
+def test_save_email_populates_preview_image_url(db_session):
+    content = (
+        b"From: s@example.com\r\n"
+        b"Subject: t\r\n"
+        b"MIME-Version: 1.0\r\n"
+        b"Content-Type: text/html; charset=utf-8\r\n\r\n"
+        b'<p>body</p><img src="http://cdn.example.com/hero.jpg" width="600" height="400">'
+    )
+    db.save_email(
+        sender="s@example.com", receiver="me@localhost", email_id=2,
+        subject="t", content=content, timestamp=datetime.datetime(2026, 4, 13),
+    )
+    row = db_session.query(db.Email).filter_by(email_id=2).first()
+    assert row.preview_image_url == "http://cdn.example.com/hero.jpg"
+
+
+def test_save_email_leaves_preview_null_when_no_usable_image(db_session):
+    content = (
+        b"From: s@example.com\r\n"
+        b"Subject: t\r\n"
+        b"MIME-Version: 1.0\r\n"
+        b"Content-Type: text/html; charset=utf-8\r\n\r\n"
+        b"<p>no images</p>"
+    )
+    db.save_email(
+        sender="s@example.com", receiver="me@localhost", email_id=3,
+        subject="t", content=content, timestamp=datetime.datetime(2026, 4, 13),
+    )
+    row = db_session.query(db.Email).filter_by(email_id=3).first()
+    assert row.preview_image_url is None
+
+
+def test_backfill_preview_images_populates_existing_rows(db_session):
+    """Simulate a pre-migration DB: insert a row with an image, then clear
+    preview_image_url, then run _backfill_preview_images."""
+    from sqlalchemy import text as _text
+
+    content = (
+        b"From: s@example.com\r\n"
+        b"Subject: t\r\n"
+        b"MIME-Version: 1.0\r\n"
+        b"Content-Type: text/html; charset=utf-8\r\n\r\n"
+        b'<img src="http://x.com/pic.jpg" width="600" height="400">'
+    )
+    db.save_email(
+        sender="s@example.com", receiver="me@localhost", email_id=4,
+        subject="t", content=content, timestamp=datetime.datetime(2026, 4, 13),
+    )
+    # Reset to simulate pre-column state
+    with db.engine.connect() as conn:
+        conn.execute(_text("UPDATE emails SET preview_image_url = NULL"))
+        conn.commit()
+        db._backfill_preview_images(conn)
+
+    row = db_session.query(db.Email).filter_by(email_id=4).first()
+    assert row.preview_image_url == "http://x.com/pic.jpg"
