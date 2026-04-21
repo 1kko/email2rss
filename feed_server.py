@@ -219,6 +219,9 @@ app = create_app()
 def main():
     logging.basicConfig(level=logging.INFO)
 
+    from common import validate_reader_config
+    validate_reader_config()
+
     FEED_DIR.mkdir(parents=True, exist_ok=True)
 
     port = config.get("port")
