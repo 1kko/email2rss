@@ -141,26 +141,31 @@ def fetch_image(url: str, secret: bytes) -> tuple[bytes, str]:
     """
     parsed = urlparse(url)
     if parsed.scheme not in ("http", "https"):
+        logger.info("fetch_image reject: bad scheme url=%r", url)
         abort(400)
 
     host = parsed.hostname
     if not host:
+        logger.info("fetch_image reject: no hostname url=%r", url)
         abort(400)
 
     port = parsed.port or (443 if parsed.scheme == "https" else 80)
 
     try:
         infos = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
-    except socket.gaierror:
+    except socket.gaierror as e:
+        logger.info("fetch_image reject: DNS failure host=%s err=%s", host, e)
         abort(502)
 
     resolved_ips = {info[4][0] for info in infos}
     if not resolved_ips:
+        logger.info("fetch_image reject: empty DNS resolution host=%s", host)
         abort(502)
 
     # Reject if ANY resolved address is non-public
     for ip_str in resolved_ips:
         if not _is_public_ip(ip_str):
+            logger.info("fetch_image reject: non-public IP host=%s ip=%s", host, ip_str)
             abort(403)
 
     pinned_ip = next(iter(resolved_ips))
@@ -184,10 +189,15 @@ def fetch_image(url: str, secret: bytes) -> tuple[bytes, str]:
 
     try:
         if resp.status_code != 200:
+            logger.info(
+                "fetch_image reject: upstream status=%s url=%s location=%s",
+                resp.status_code, url, resp.headers.get("Location", ""),
+            )
             abort(502)
 
         ctype = (resp.headers.get("Content-Type") or "").split(";")[0].strip().lower()
         if ctype not in ALLOWED_IMAGE_TYPES:
+            logger.info("fetch_image reject: bad content-type=%r url=%s", ctype, url)
             abort(415)
 
         body = bytearray()
@@ -195,6 +205,7 @@ def fetch_image(url: str, secret: bytes) -> tuple[bytes, str]:
             if chunk:
                 body.extend(chunk)
                 if len(body) > MAX_IMAGE_BYTES:
+                    logger.info("fetch_image reject: oversize url=%s", url)
                     abort(413)
 
         return bytes(body), ctype
