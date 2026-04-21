@@ -34,8 +34,21 @@ body {
     line-height: 1.6;
     color: var(--text-color);
     background-color: var(--bg-color);
-    padding: 1rem;
+    margin: 0;
+    padding: 0;
 }
+
+/* Pages without an outer wrapper (e.g. /list) get horizontal padding via their
+   direct-child elements. Pages with their own wrappers (.article, .feed-rows)
+   set their own padding. */
+body > h1,
+body > p,
+body > ul,
+body > ol {
+    padding-left: 1rem;
+    padding-right: 1rem;
+}
+body > h1:first-of-type { padding-top: 1rem; }
 
 article {
     max-width: 900px;
@@ -166,16 +179,35 @@ h1 {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 1rem;
   padding: 0.75rem 1rem;
   border-bottom: 1px solid #e0e0e0;
   background: #fafafa;
 }
-.site-nav .nav-home { font-weight: 600; text-decoration: none; color: #222; }
+.site-nav__left {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+.site-nav .nav-home {
+  font-weight: 700;
+  text-decoration: none;
+  color: #222;
+  font-size: 1.05rem;
+  letter-spacing: -0.01em;
+}
+.site-nav .nav-link {
+  font-weight: 500;
+  text-decoration: none;
+  color: #555;
+  font-size: 0.9rem;
+}
+.site-nav .nav-link:hover { color: #222; }
 .site-nav .nav-search input[type="search"] {
   padding: 0.4rem 0.6rem;
   border: 1px solid #ccc;
   border-radius: 4px;
-  min-width: 250px;
+  min-width: 200px;
   font-size: 0.9rem;
 }
 
@@ -224,6 +256,8 @@ h1 {
 @media (prefers-color-scheme: dark) {
   .site-nav { background: #222; border-bottom-color: #444; }
   .site-nav .nav-home { color: #eee; }
+  .site-nav .nav-link { color: #aaa; }
+  .site-nav .nav-link:hover { color: #eee; }
   .site-nav .nav-search input[type="search"] {
     background: #333; border-color: #555; color: #eee;
   }

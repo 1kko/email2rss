@@ -9,7 +9,10 @@
 </head>
 <body>
   <nav class="site-nav">
-    <a href="/article" class="nav-home">All Articles</a>
+    <div class="site-nav__left">
+      <a href="/" class="nav-home" aria-label="email2rss home">email2rss</a>
+      <a href="/article" class="nav-link">All Articles</a>
+    </div>
     <form class="nav-search" action="/search" method="get">
       <input type="search" name="q" placeholder="Search..." value="{{ search_q or '' }}" required>
     </form>

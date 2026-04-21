@@ -314,3 +314,41 @@ def test_extract_preview_image_accepts_image_without_declared_dimensions():
     # No width/height attributes → we can't verify size, accept it
     msg = _make_html_msg('<img src="http://x.com/maybe.png">')
     assert reader.extract_preview_image(msg) == "http://x.com/maybe.png"
+
+
+def test_extract_preview_image_prefers_largest_when_multiple_declared():
+    """Newsletter layout: small logo at top, larger hero below — hero should win."""
+    msg = _make_html_msg(
+        '<header><img src="http://x.com/banner.png" width="180" height="80"></header>'
+        '<article><img src="http://x.com/hero.jpg" width="900" height="600"></article>'
+        '<footer><img src="http://x.com/signature.png" width="200" height="60"></footer>'
+    )
+    assert reader.extract_preview_image(msg) == "http://x.com/hero.jpg"
+
+
+def test_extract_preview_image_skips_logo_filenames():
+    """Images with 'logo' or 'brand' in the filename are skipped regardless of size."""
+    msg = _make_html_msg(
+        '<img src="http://x.com/company-logo.png" width="800" height="200">'
+        '<img src="http://x.com/brand-mark.png" width="800" height="200">'
+        '<img src="http://x.com/hero-content.jpg" width="600" height="400">'
+    )
+    assert reader.extract_preview_image(msg) == "http://x.com/hero-content.jpg"
+
+
+def test_extract_preview_image_skips_masthead_and_sig_filenames():
+    msg = _make_html_msg(
+        '<img src="http://x.com/newsletter-masthead.png" width="800" height="120">'
+        '<img src="http://x.com/sig-author.png" width="300" height="300">'
+        '<img src="http://x.com/article-photo.jpg" width="600" height="400">'
+    )
+    assert reader.extract_preview_image(msg) == "http://x.com/article-photo.jpg"
+
+
+def test_extract_preview_image_falls_back_to_first_when_no_dimensions():
+    """If NO candidate has declared dimensions, we can't pick by area — first wins."""
+    msg = _make_html_msg(
+        '<img src="http://x.com/first.png">'
+        '<img src="http://x.com/second.png">'
+    )
+    assert reader.extract_preview_image(msg) == "http://x.com/first.png"
