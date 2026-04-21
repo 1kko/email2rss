@@ -240,7 +240,14 @@ def create_app() -> Flask:
         return jsonify({"is_starred": False})
 
     @app.get("/")
-    def index():
+    def home():
+        # Landing-page limits are fixed. max_item_per_feed (default 100) drives
+        # RSS XML feed size, a separate concern.
+        data = db.get_landing_data(latest_limit=10, per_sender_limit=10)
+        return render_template("index.html", data=data)
+
+    @app.get("/list")
+    def xml_file_list():
         try:
             entries = sorted(
                 p.name for p in FEED_DIR.iterdir()
@@ -248,11 +255,7 @@ def create_app() -> Flask:
             )
         except FileNotFoundError:
             entries = []
-        return render_template(
-            "index.html",
-            entries=entries,
-            enable_internal_reader=bool(config.get("enable_internal_reader")),
-        )
+        return render_template("list.html", entries=entries)
 
     @app.get("/img")
     def image_proxy_route():

@@ -228,6 +228,12 @@ enable_internal_reader=false
 - **Internal Reader** (when enabled): `http://localhost:8000/article/{feed}/{guid}`
   - Click article links in your RSS reader to view content directly
 
+### Landing Page
+
+- **`/`** — Browsable landing with per-newsletter rows of article cards (Netflix-style). Each row scrolls horizontally (touch-swipe friendly; arrow buttons on desktop hover). A "Latest" section at the top mixes the 10 newest articles across all feeds.
+- **`/list`** — The plain XML-file list (the pre-redesign `/` behavior). Useful for grabbing raw `/<feed>.xml` URLs into an RSS reader.
+- **`/<feed>.xml`** — Unchanged. RSS readers and direct-URL bookmarks are unaffected by the redesign.
+
 ### Running Locally (without Docker)
 
 ```bash

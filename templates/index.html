@@ -1,13 +1,36 @@
 {% extends "base.html" %}
 {% block title %}email2rss{% endblock %}
 {% block body %}
-<h1>email2rss</h1>
-{% if enable_internal_reader %}
-<p><a href="/article">Open internal reader</a></p>
-{% endif %}
-<ul>
-  {% for name in entries %}
-    <li><a href="/{{ name }}">{{ name }}</a></li>
-  {% endfor %}
-</ul>
+{% import "_cards.html" as cards %}
+
+<main class="feed-rows">
+  {% if not data.latest and not data.rows %}
+    <p class="empty">No feeds yet. The IMAP fetcher will populate this page once it pulls in emails.</p>
+  {% else %}
+    <section class="feed-row latest-section">
+      <div class="feed-row__header">
+        <h2 class="feed-row__title">✦ Latest</h2>
+        <a class="feed-row__see-all" href="/article">Last {{ data.latest|length }} · See all →</a>
+      </div>
+      {{ cards.scroller(data.latest, portrait=True) }}
+    </section>
+
+    {% for row in data.rows %}
+      <section class="feed-row">
+        <div class="feed-row__header">
+          <h2 class="feed-row__title">
+            {{ cards.row_favicon(row) }}
+            {{ row.sender }}
+          </h2>
+          <a class="feed-row__see-all" href="/article/{{ row.feed_name }}">
+            {{ row.article_count }} articles · See all →
+          </a>
+        </div>
+        {{ cards.scroller(row.articles, portrait=False) }}
+      </section>
+    {% endfor %}
+  {% endif %}
+</main>
+
+<script src="{{ url_for('static', filename='reader.js') }}"></script>
 {% endblock %}

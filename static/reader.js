@@ -59,3 +59,40 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 });
+
+// --- Landing page scroller wiring (Netflix-style horizontal rows) ---
+// For each .feed-row__scroller: drive arrows, edge-fade opacity via data attrs.
+// Runs on / (landing) only; has no effect on other pages.
+document.addEventListener('DOMContentLoaded', () => {
+  document.querySelectorAll('.feed-row__scroller').forEach((scroller) => {
+    const track = scroller.querySelector('.feed-row__track');
+    const prev = scroller.querySelector('.feed-row__arrow--prev');
+    const next = scroller.querySelector('.feed-row__arrow--next');
+    if (!track || !prev || !next) return;
+
+    function cardStep() {
+      const firstCard = track.querySelector('.article-card');
+      if (!firstCard) return 260;
+      return firstCard.offsetWidth + 18; // gap 1.1rem ≈ 18px
+    }
+
+    function updateState() {
+      const atStart = track.scrollLeft <= 1;
+      const atEnd = track.scrollLeft + track.clientWidth >= track.scrollWidth - 1;
+      scroller.dataset.atStart = atStart;
+      scroller.dataset.atEnd = atEnd;
+      prev.disabled = atStart;
+      next.disabled = atEnd;
+    }
+
+    prev.addEventListener('click', () => {
+      track.scrollBy({ left: -cardStep() * 2, behavior: 'smooth' });
+    });
+    next.addEventListener('click', () => {
+      track.scrollBy({ left: cardStep() * 2, behavior: 'smooth' });
+    });
+    track.addEventListener('scroll', updateState, { passive: true });
+    window.addEventListener('resize', updateState);
+    requestAnimationFrame(updateState);
+  });
+});
