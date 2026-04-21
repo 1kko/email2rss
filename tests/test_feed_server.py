@@ -3,6 +3,8 @@ import base64 as _b64mod
 import hashlib
 import socket as _socket_mod
 
+import pytest
+
 from defusedxml.ElementTree import fromstring as safe_fromstring
 
 import feed_server
@@ -198,3 +200,19 @@ def test_article_route_has_tightened_outer_csp(client, db_session, monkeypatch):
     assert "img-src 'self' data:" in csp
     assert "img-src *" not in csp
     assert "frame-src 'self'" in csp
+
+
+def test_main_aborts_when_reader_enabled_without_baseurl(monkeypatch):
+    """Task 6 gap: validate_reader_config must run at startup."""
+    import feed_server
+    import common
+    monkeypatch.setitem(common.config, "enable_internal_reader", True)
+    monkeypatch.setitem(common.config, "server_baseurl", None)
+
+    # Intercept before it actually calls .run() or mkdir. Stub everything downstream.
+    monkeypatch.setattr(feed_server, "FEED_DIR", feed_server.FEED_DIR)  # no-op
+    # Replace app.run so the test doesn't actually start a server
+    monkeypatch.setattr(feed_server.app, "run", lambda **kw: None)
+
+    with pytest.raises(RuntimeError, match="server_baseurl"):
+        feed_server.main()
