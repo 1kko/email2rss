@@ -1,0 +1,238 @@
+"""Tests for img_proxy.py — HMAC signing, DNS pinning, SSRF defenses."""
+import base64
+import hmac as hmac_mod
+import socket
+from unittest import mock
+
+import pytest
+from werkzeug.exceptions import HTTPException
+
+import img_proxy
+
+
+TEST_SECRET = b"test-secret-do-not-use-in-prod"
+TEST_BASE = "http://localhost:8000"
+
+
+def _b64(s: str) -> str:
+    return base64.urlsafe_b64encode(s.encode()).decode().rstrip("=")
+
+
+def test_sign_url_produces_deterministic_output():
+    url = "http://example.com/x.png"
+    a = img_proxy.sign_url(url, TEST_SECRET, TEST_BASE)
+    b = img_proxy.sign_url(url, TEST_SECRET, TEST_BASE)
+    assert a == b
+    assert a.startswith("http://localhost:8000/img?u=")
+    assert "&sig=" in a
+
+
+def test_sign_url_encodes_url_as_urlsafe_base64():
+    url = "http://example.com/x.png"
+    signed = img_proxy.sign_url(url, TEST_SECRET, TEST_BASE)
+    # Extract u= parameter
+    from urllib.parse import parse_qs, urlparse
+    q = parse_qs(urlparse(signed).query)
+    assert "u" in q and "sig" in q
+    decoded = base64.urlsafe_b64decode(q["u"][0] + "===").decode()
+    assert decoded == url
+
+
+def test_verify_signature_accepts_valid():
+    url = "http://example.com/x.png"
+    u_param = _b64(url)
+    sig = img_proxy._compute_sig(u_param, TEST_SECRET)
+    assert img_proxy.verify_signature(u_param, sig, TEST_SECRET) is True
+
+
+def test_verify_signature_rejects_tampered():
+    url = "http://example.com/x.png"
+    u_param = _b64(url)
+    sig = img_proxy._compute_sig(u_param, TEST_SECRET)
+    bad = sig[:-1] + ("0" if sig[-1] != "0" else "1")
+    assert img_proxy.verify_signature(u_param, bad, TEST_SECRET) is False
+
+
+def test_verify_signature_is_timing_safe():
+    # Not a real timing test — just ensures it uses hmac.compare_digest,
+    # which we verify by monkeypatching compare_digest and confirming it's called.
+    url = "http://example.com/x.png"
+    u_param = _b64(url)
+    sig = img_proxy._compute_sig(u_param, TEST_SECRET)
+    with mock.patch("img_proxy.hmac.compare_digest", wraps=hmac_mod.compare_digest) as spy:
+        assert img_proxy.verify_signature(u_param, sig, TEST_SECRET) is True
+        assert spy.called
+
+
+def _signed_param(url: str) -> tuple[str, str]:
+    u = _b64(url)
+    return u, img_proxy._compute_sig(u, TEST_SECRET)
+
+
+def test_fetch_image_rejects_non_http_scheme():
+    with pytest.raises(HTTPException) as ei:
+        img_proxy.fetch_image("file:///etc/passwd", TEST_SECRET)
+    assert ei.value.code == 400
+
+
+def test_fetch_image_rejects_private_ipv4(monkeypatch):
+    def fake_getaddrinfo(host, port, family=0, type=0, proto=0, flags=0):
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("10.0.0.1", port))]
+    monkeypatch.setattr(socket, "getaddrinfo", fake_getaddrinfo)
+
+    with pytest.raises(HTTPException) as ei:
+        img_proxy.fetch_image("http://evil.example.com/x.png", TEST_SECRET)
+    assert ei.value.code == 403
+
+
+def test_fetch_image_rejects_loopback(monkeypatch):
+    def fake_getaddrinfo(host, port, **kw):
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("127.0.0.1", port))]
+    monkeypatch.setattr(socket, "getaddrinfo", fake_getaddrinfo)
+
+    with pytest.raises(HTTPException) as ei:
+        img_proxy.fetch_image("http://evil.example.com/x.png", TEST_SECRET)
+    assert ei.value.code == 403
+
+
+def test_fetch_image_rejects_link_local(monkeypatch):
+    def fake_getaddrinfo(host, port, **kw):
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("169.254.169.254", port))]
+    monkeypatch.setattr(socket, "getaddrinfo", fake_getaddrinfo)
+
+    with pytest.raises(HTTPException) as ei:
+        img_proxy.fetch_image("http://169.254.169.254/latest/meta-data", TEST_SECRET)
+    assert ei.value.code == 403
+
+
+def test_fetch_image_rejects_private_ipv6(monkeypatch):
+    def fake_getaddrinfo(host, port, **kw):
+        return [(socket.AF_INET6, socket.SOCK_STREAM, 6, "", ("fc00::1", port, 0, 0))]
+    monkeypatch.setattr(socket, "getaddrinfo", fake_getaddrinfo)
+
+    with pytest.raises(HTTPException) as ei:
+        img_proxy.fetch_image("http://evil.example.com/x.png", TEST_SECRET)
+    assert ei.value.code == 403
+
+
+def test_fetch_image_rejects_when_any_resolved_ip_is_private(monkeypatch):
+    def fake_getaddrinfo(host, port, **kw):
+        return [
+            (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("8.8.8.8", port)),
+            (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("10.0.0.1", port)),
+        ]
+    monkeypatch.setattr(socket, "getaddrinfo", fake_getaddrinfo)
+    with pytest.raises(HTTPException) as ei:
+        img_proxy.fetch_image("http://mixed.example.com/x.png", TEST_SECRET)
+    assert ei.value.code == 403
+
+
+def _fake_response(status, headers, body_chunks):
+    """Return a minimal duck-typed response for requests.Session.send patching."""
+    class R:
+        status_code = status
+
+        def __init__(self):
+            self.headers = headers
+            self._chunks = list(body_chunks)
+
+        def iter_content(self, chunk_size=None):
+            return iter(self._chunks)
+
+        def close(self):
+            pass
+    return R()
+
+
+def test_fetch_image_happy_path_png(monkeypatch):
+    def fake_getaddrinfo(host, port, **kw):
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", port))]
+    monkeypatch.setattr(socket, "getaddrinfo", fake_getaddrinfo)
+
+    png_body = b"\x89PNG\r\n\x1a\n" + b"\x00" * 100
+
+    def fake_send(session, req, **kw):
+        assert req.url.startswith("http://93.184.216.34/") or req.url.startswith("http://example.com/")
+        # We accept either, because the adapter may rewrite the URL
+        assert req.headers.get("Host") == "example.com" or "Host" not in req.headers
+        return _fake_response(200, {"Content-Type": "image/png"}, [png_body])
+
+    monkeypatch.setattr("requests.Session.send", fake_send)
+
+    body, ctype = img_proxy.fetch_image("http://example.com/x.png", TEST_SECRET)
+    assert body == png_body
+    assert ctype == "image/png"
+
+
+def test_fetch_image_rejects_html_content_type(monkeypatch):
+    def fake_getaddrinfo(host, port, **kw):
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", port))]
+    monkeypatch.setattr(socket, "getaddrinfo", fake_getaddrinfo)
+
+    def fake_send(session, req, **kw):
+        return _fake_response(200, {"Content-Type": "text/html"}, [b"<html>"])
+    monkeypatch.setattr("requests.Session.send", fake_send)
+
+    with pytest.raises(HTTPException) as ei:
+        img_proxy.fetch_image("http://example.com/x", TEST_SECRET)
+    assert ei.value.code == 415
+
+
+def test_fetch_image_rejects_svg_content_type(monkeypatch):
+    def fake_getaddrinfo(host, port, **kw):
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", port))]
+    monkeypatch.setattr(socket, "getaddrinfo", fake_getaddrinfo)
+
+    def fake_send(session, req, **kw):
+        return _fake_response(200, {"Content-Type": "image/svg+xml"}, [b"<svg/>"])
+    monkeypatch.setattr("requests.Session.send", fake_send)
+
+    with pytest.raises(HTTPException) as ei:
+        img_proxy.fetch_image("http://example.com/x.svg", TEST_SECRET)
+    assert ei.value.code == 415
+
+
+def test_fetch_image_rejects_oversized(monkeypatch):
+    def fake_getaddrinfo(host, port, **kw):
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", port))]
+    monkeypatch.setattr(socket, "getaddrinfo", fake_getaddrinfo)
+
+    big_chunks = [b"A" * 1_048_576] * 6  # 6 MB streamed
+
+    def fake_send(session, req, **kw):
+        return _fake_response(200, {"Content-Type": "image/png"}, big_chunks)
+    monkeypatch.setattr("requests.Session.send", fake_send)
+
+    with pytest.raises(HTTPException) as ei:
+        img_proxy.fetch_image("http://example.com/x.png", TEST_SECRET)
+    assert ei.value.code == 413
+
+
+def test_fetch_image_rejects_non_200(monkeypatch):
+    def fake_getaddrinfo(host, port, **kw):
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", port))]
+    monkeypatch.setattr(socket, "getaddrinfo", fake_getaddrinfo)
+
+    def fake_send(session, req, **kw):
+        return _fake_response(302, {"Location": "http://other/"}, [])
+    monkeypatch.setattr("requests.Session.send", fake_send)
+
+    with pytest.raises(HTTPException) as ei:
+        img_proxy.fetch_image("http://example.com/x", TEST_SECRET)
+    assert ei.value.code == 502
+
+
+def test_fetch_image_timeout_becomes_502(monkeypatch):
+    import requests as requests_mod
+
+    def fake_getaddrinfo(host, port, **kw):
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", port))]
+    monkeypatch.setattr(socket, "getaddrinfo", fake_getaddrinfo)
+
+    def fake_send(session, req, **kw):
+        raise requests_mod.Timeout("simulated timeout")
+    monkeypatch.setattr("requests.Session.send", fake_send)
+
+    with pytest.raises(HTTPException) as ei:
+        img_proxy.fetch_image("http://example.com/x", TEST_SECRET)
+    assert ei.value.code == 502
