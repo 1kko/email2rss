@@ -72,3 +72,35 @@ def test_required_indexes_exist(db_session):
         got = {row[0] for row in rows}
     missing = expected - got
     assert not missing, f"missing indexes: {missing}"
+
+
+def test_delete_emails_older_than_deletes_matching_rows(db_session):
+    # 5 rows: days 10, 11, 12, 13, 14 of 2026-04
+    for i, day in enumerate([10, 11, 12, 13, 14]):
+        insert_email(db_session, email_id=i, timestamp=datetime.datetime(2026, 4, day))
+
+    cutoff = datetime.datetime(2026, 4, 12)
+    deleted = db.delete_emails_older_than(cutoff)
+
+    assert deleted == 2
+    remaining = db_session.query(db.Email).all()
+    assert len(remaining) == 3
+    for row in remaining:
+        assert row.timestamp >= cutoff
+
+
+def test_delete_emails_older_than_returns_count(db_session):
+    insert_email(db_session, email_id=1, timestamp=datetime.datetime(2026, 4, 1))
+    insert_email(db_session, email_id=2, timestamp=datetime.datetime(2026, 4, 2))
+    insert_email(db_session, email_id=3, timestamp=datetime.datetime(2026, 4, 20))
+
+    deleted = db.delete_emails_older_than(datetime.datetime(2026, 4, 10))
+    assert deleted == 2
+
+
+def test_delete_emails_older_than_zero_rows_is_noop(db_session):
+    insert_email(db_session, email_id=1, timestamp=datetime.datetime(2026, 4, 20))
+
+    deleted = db.delete_emails_older_than(datetime.datetime(2026, 1, 1))
+    assert deleted == 0
+    assert db.get_entry_count() == 1
