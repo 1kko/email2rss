@@ -65,10 +65,24 @@ def _load_or_create_img_proxy_secret() -> bytes:
 
 def validate_reader_config() -> None:
     """Raise RuntimeError if the reader is enabled but config is incomplete."""
-    if config.get("enable_internal_reader") and not config.get("server_baseurl"):
+    if not config.get("enable_internal_reader"):
+        return
+    baseurl = config.get("server_baseurl")
+    if not baseurl:
         raise RuntimeError(
             "enable_internal_reader=true requires server_baseurl to be set "
             "(the proxy origin for signed /img URLs). Set server_baseurl in .env."
+        )
+    # Defensive: baseurl flows into the iframe CSP meta tag. Reject anything
+    # containing characters that could break out of the directive.
+    if any(ch in baseurl for ch in (";", " ", "\t", "\n", "\r", '"', "'", "<", ">")):
+        raise RuntimeError(
+            f"server_baseurl {baseurl!r} contains illegal characters; "
+            "expected a plain origin like 'http://localhost:8000' or 'https://example.com'."
+        )
+    if not (baseurl.startswith("http://") or baseurl.startswith("https://")):
+        raise RuntimeError(
+            f"server_baseurl {baseurl!r} must start with http:// or https://."
         )
 
 

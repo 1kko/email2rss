@@ -8,7 +8,8 @@ from typing import Callable
 
 import bleach
 from bleach.css_sanitizer import CSSSanitizer
-from bleach.html5lib_shim import Filter
+from bleach.html5lib_shim import Filter, attr_val_is_uri
+from bleach.sanitizer import BleachSanitizerFilter
 
 logger = logging.getLogger(__name__)
 
@@ -102,7 +103,7 @@ ALLOWED_ATTRS = {
     "time": ["datetime"],
 }
 
-ALLOWED_PROTOCOLS = frozenset({"http", "https", "mailto", "tel", "data", "cid"})
+ALLOWED_PROTOCOLS = frozenset({"http", "https", "mailto", "tel"})
 
 CSS_SANITIZER = CSSSanitizer(allowed_svg_properties=[])
 
@@ -137,16 +138,67 @@ def _resolve_img_src(
     if not src:
         return None
     s = src.strip()
-    if s.startswith("data:"):
+    sl = s.lower()
+    if sl.startswith("data:"):
         return s
-    if s.startswith("cid:"):
-        cid = s[4:]
-        return cid_map.get(cid)
+    if sl.startswith("cid:"):
+        return cid_map.get(s[4:])
     if s.startswith("//"):
         return sign_url("https:" + s)
-    if s.startswith("http://") or s.startswith("https://"):
+    if sl.startswith("http://") or sl.startswith("https://"):
         return sign_url(s)
     return None  # relative or unknown scheme: drop
+
+
+# attr_val_is_uri without (None, "src"): bleach won't protocol-check img src,
+# leaving that entirely to ImageRewriter. This is safe because every other
+# src-bearing element (video, audio, iframe, …) is absent from ALLOWED_TAGS
+# and is stripped before it reaches the serializer.
+_ATTR_VAL_IS_URI_NO_SRC = attr_val_is_uri - {(None, "src")}
+
+
+class _ImageSrcPassthroughCleaner(bleach.Cleaner):
+    """Cleaner that skips bleach's protocol check on src attributes.
+
+    bleach's BleachSanitizerFilter applies the allowed-protocols allowlist to
+    every attribute in attr_val_is_uri (which includes "src") uniformly across
+    all tags. That strips data: and cid: from <img src> before our ImageRewriter
+    filter can handle them.
+
+    By subclassing and injecting a reduced attr_val_is_uri we delegate full
+    validation of <img src> to ImageRewriter, which only passes through:
+      - data: URIs  (from the cid_map, set by ImageRewriter itself)
+      - http:/https: URLs  (proxied via sign_url)
+      - protocol-relative //  (promoted to https and proxied)
+    All other src values — including relative paths and unknown schemes — are
+    dropped by ImageRewriter (the tag is removed entirely).  data:/cid: on
+    <a href> remain blocked because "data" and "cid" are absent from
+    ALLOWED_PROTOCOLS and href is still in attr_val_is_uri.
+    """
+
+    def clean(self, text: str) -> str:
+        if not isinstance(text, str):
+            raise TypeError(
+                f"argument cannot be of {text.__class__.__name__!r} type, "
+                "must be of text type"
+            )
+        if not text:
+            return ""
+
+        dom = self.parser.parseFragment(text)
+        filtered = BleachSanitizerFilter(
+            source=self.walker(dom),
+            allowed_tags=self.tags,
+            attributes=self.attributes,
+            strip_disallowed_tags=self.strip,
+            strip_html_comments=self.strip_comments,
+            css_sanitizer=self.css_sanitizer,
+            allowed_protocols=self.protocols,
+            attr_val_is_uri=_ATTR_VAL_IS_URI_NO_SRC,
+        )
+        for filter_class in self.filters:
+            filtered = filter_class(source=filtered)
+        return self.serializer.render(filtered)
 
 
 def clean_and_rewrite(
@@ -156,7 +208,7 @@ def clean_and_rewrite(
 ) -> str:
     """Sanitize HTML with bleach and rewrite image sources for cid/data/proxy."""
     ImageRewriter = _make_image_rewriter(cid_map, sign_url)
-    cleaner = bleach.Cleaner(
+    cleaner = _ImageSrcPassthroughCleaner(
         tags=ALLOWED_TAGS,
         attributes=ALLOWED_ATTRS,
         protocols=ALLOWED_PROTOCOLS,
