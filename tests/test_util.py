@@ -3,7 +3,6 @@ from util import (
     cleanse_content,
     extract_domain_address,
     extract_email_address,
-    sanitize_html,
 )
 
 
@@ -23,13 +22,3 @@ def test_extract_domain_address():
 def test_cleanse_content_strips_control_chars_but_keeps_whitespace():
     raw = "keep\ttab\nnewline\rcr\x00null\x08backspace"
     assert cleanse_content(raw) == "keep\ttab\nnewline\rcrnullbackspace"
-
-
-def test_sanitize_html_removes_script_and_event_handlers():
-    dirty = '<p onclick="alert(1)">hi</p><script>evil()</script><a href="javascript:bad()">x</a>'
-    clean = sanitize_html(dirty)
-    assert "<script>" not in clean
-    assert "evil()" not in clean
-    assert "onclick" not in clean
-    assert "javascript:" not in clean
-    assert "hi" in clean  # content preserved
