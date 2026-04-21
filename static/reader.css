@@ -153,3 +153,78 @@ h1 {
   display: block;
   background: transparent;
 }
+
+/* Site nav (header) */
+.site-nav {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid #e0e0e0;
+  background: #fafafa;
+}
+.site-nav .nav-home { font-weight: 600; text-decoration: none; color: #222; }
+.site-nav .nav-search input[type="search"] {
+  padding: 0.4rem 0.6rem;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  min-width: 250px;
+  font-size: 0.9rem;
+}
+
+/* Filter chips */
+.filter-chips { display: flex; gap: 0.5rem; margin: 1rem 0; }
+.filter-chips .chip {
+  padding: 0.25rem 0.75rem;
+  border: 1px solid #ccc;
+  border-radius: 999px;
+  text-decoration: none;
+  color: #444;
+  font-size: 0.85rem;
+}
+.filter-chips .chip.active { background: #0066cc; color: white; border-color: #0066cc; }
+
+/* Article list unread styling */
+.article-list li.unread a { font-weight: 700; }
+.article-list .star { color: #d4a017; margin-right: 0.25rem; }
+
+/* Article page toolbar */
+.article-actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+.article-actions button {
+  padding: 0.3rem 0.7rem;
+  border: 1px solid #ccc;
+  background: white;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+.article-actions button:hover { background: #f0f0f0; }
+.article-actions #star-btn .star-icon { font-size: 1.1rem; }
+
+/* Search results */
+.search-results .snippet {
+  color: #555;
+  font-size: 0.9rem;
+  margin-top: 0.25rem;
+}
+.search-results .snippet b { background: #fff3a3; font-weight: 600; }
+
+/* Dark mode tweaks for new elements */
+@media (prefers-color-scheme: dark) {
+  .site-nav { background: #222; border-bottom-color: #444; }
+  .site-nav .nav-home { color: #eee; }
+  .site-nav .nav-search input[type="search"] {
+    background: #333; border-color: #555; color: #eee;
+  }
+  .filter-chips .chip { border-color: #555; color: #ddd; }
+  .filter-chips .chip.active { background: #4a9eff; border-color: #4a9eff; }
+  .article-list .star { color: #ffcc44; }
+  .article-actions button { background: #333; border-color: #555; color: #eee; }
+  .article-actions button:hover { background: #444; }
+  .search-results .snippet { color: #aaa; }
+  .search-results .snippet b { background: #665500; color: #fff; }
+}
