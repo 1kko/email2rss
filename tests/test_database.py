@@ -461,12 +461,11 @@ def test_backfill_preview_images_populates_existing_rows(db_session):
     assert row.preview_image_url == "http://x.com/pic.jpg"
 
 
-def test_migrate_v1_invalidates_and_rebackfills_preview_image_url(db_session):
+def test_migrate_from_v0_runs_all_invalidations_and_bumps_to_current(db_session):
     """
-    v1 migration: pre-v1 rows have preview_image_url values cached before the
-    logo-filter + largest-image extractor landed. Running migrate_database()
-    on a user_version=0 DB nulls them, then _backfill_preview_images re-extracts
-    with current logic. user_version bumps to 1.
+    Fresh/pre-mechanism DBs have user_version=0. migrate_database() runs every
+    version-gated block in order (v1, v2, ...) and bumps to the latest schema
+    version. Cached preview URLs are re-extracted with the current logic.
     """
     content = (
         b"From: s@example.com\r\nSubject: t\r\n"
@@ -478,10 +477,10 @@ def test_migrate_v1_invalidates_and_rebackfills_preview_image_url(db_session):
         sender="s@example.com", receiver="me@localhost", email_id=777,
         subject="t", content=content, timestamp=datetime.datetime(2026, 4, 13),
     )
-    # Simulate stale cached logo URL + pre-v1 schema version
+    # Simulate stale cached value + pre-migration-mechanism schema version
     with db.engine.connect() as conn:
         conn.execute(text(
-            "UPDATE emails SET preview_image_url = 'http://cdn.x.com/stale-logo.png' "
+            "UPDATE emails SET preview_image_url = 'http://cdn.x.com/stale.png' "
             "WHERE email_id = 777"
         ))
         conn.execute(text("PRAGMA user_version = 0"))
@@ -491,27 +490,28 @@ def test_migrate_v1_invalidates_and_rebackfills_preview_image_url(db_session):
 
     with db.engine.connect() as conn:
         uv = conn.execute(text("PRAGMA user_version")).scalar()
-    assert uv == 1
+    assert uv == 2  # current schema version
 
     db_session.expire_all()
     row = db_session.query(db.Email).filter_by(email_id=777).first()
     assert row.preview_image_url == "http://x.com/real-hero.jpg"
 
 
-def test_migrate_v1_idempotent_when_user_version_is_1(db_session):
-    """Second run of migrate_database must NOT null already-valid preview_image_url."""
+def test_migrate_idempotent_at_current_schema_version(db_session):
+    """Second run of migrate_database must NOT null preview_image_url once user_version
+    is at the current schema level — all version-gated blocks are no-ops."""
     content = b"From: s@example.com\r\nSubject: t\r\n\r\nbody"
     db.save_email(
         sender="s@example.com", receiver="me@localhost", email_id=888,
         subject="t", content=content, timestamp=datetime.datetime(2026, 4, 13),
     )
-    # Simulate post-v1 state: set user_version=1 and a specific preview URL
+    # Simulate fully-migrated state: user_version=2 (current) + a specific URL
     with db.engine.connect() as conn:
         conn.execute(text(
             "UPDATE emails SET preview_image_url = 'http://keep.me/pic.png' "
             "WHERE email_id = 888"
         ))
-        conn.execute(text("PRAGMA user_version = 1"))
+        conn.execute(text("PRAGMA user_version = 2"))
         conn.commit()
 
     db.migrate_database()
@@ -519,6 +519,44 @@ def test_migrate_v1_idempotent_when_user_version_is_1(db_session):
     db_session.expire_all()
     row = db_session.query(db.Email).filter_by(email_id=888).first()
     assert row.preview_image_url == "http://keep.me/pic.png"
+
+
+def test_migrate_v2_reinvalidates_from_v1(db_session):
+    """
+    v1 users have preview URLs picked by largest-image (which chose banners).
+    Upgrading user_version=1 → 2 nulls the column so the banner-aware extractor
+    re-runs via _backfill_preview_images.
+    """
+    content = (
+        b"From: s@example.com\r\nSubject: t\r\n"
+        b"MIME-Version: 1.0\r\n"
+        b"Content-Type: text/html; charset=utf-8\r\n\r\n"
+        b'<img src="http://x.com/masthead.png" width="600" height="100">'
+        b'<img src="http://x.com/hero.jpg" width="500" height="350">'
+    )
+    db.save_email(
+        sender="s@example.com", receiver="me@localhost", email_id=999,
+        subject="t", content=content, timestamp=datetime.datetime(2026, 4, 13),
+    )
+    # Simulate post-v1 state: banner URL cached, user_version=1
+    with db.engine.connect() as conn:
+        conn.execute(text(
+            "UPDATE emails SET preview_image_url = 'http://x.com/masthead.png' "
+            "WHERE email_id = 999"
+        ))
+        conn.execute(text("PRAGMA user_version = 1"))
+        conn.commit()
+
+    db.migrate_database()
+
+    with db.engine.connect() as conn:
+        uv = conn.execute(text("PRAGMA user_version")).scalar()
+    assert uv == 2
+
+    db_session.expire_all()
+    row = db_session.query(db.Email).filter_by(email_id=999).first()
+    # Banner-aware extractor prefers hero over the banner-shaped masthead
+    assert row.preview_image_url == "http://x.com/hero.jpg"
 
 
 def test_get_landing_data_empty_db(db_session):
