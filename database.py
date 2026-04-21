@@ -41,6 +41,7 @@ class Email(Base):
     timestamp = Column(DateTime, default=datetime.datetime.utcnow, index=True)
     is_read = Column(Boolean, default=False, nullable=False, server_default="0", index=True)
     is_starred = Column(Boolean, default=False, nullable=False, server_default="0", index=True)
+    preview_image_url = Column(String, nullable=True)  # extracted hero image; None if no usable image
 
     __table_args__ = (
         Index('idx_sender_timestamp', 'sender', 'timestamp'),
@@ -83,6 +84,11 @@ def migrate_database():
             conn.execute(text(
                 "ALTER TABLE emails ADD COLUMN is_starred BOOLEAN NOT NULL DEFAULT 0"
             ))
+        if "preview_image_url" not in existing_cols:
+            logging.info("Adding column: preview_image_url")
+            conn.execute(text(
+                "ALTER TABLE emails ADD COLUMN preview_image_url TEXT"
+            ))
 
         # Existing index check (preserved from the pre-sub-project-4 migration)
         result = conn.execute(
@@ -113,6 +119,14 @@ def migrate_database():
         if fts_count == 0 and main_count > 0:
             logging.info(f"Backfilling FTS index for {main_count} existing emails...")
             _backfill_fts_index(conn)
+
+        # Backfill preview_image_url for rows added before the column existed
+        missing_preview = conn.execute(
+            text("SELECT COUNT(*) FROM emails WHERE preview_image_url IS NULL")
+        ).scalar()
+        if missing_preview and main_count > 0:
+            logging.info(f"Backfilling preview_image_url for {missing_preview} rows...")
+            _backfill_preview_images(conn)
 
         logging.info("Database migration completed successfully")
 
@@ -166,6 +180,28 @@ def _backfill_fts_index(conn):
     logging.info(f"FTS backfill complete: {len(rows)} rows indexed")
 
 
+def _backfill_preview_images(conn):
+    """Populate preview_image_url for emails that predate the column. One-time."""
+    import reader  # local import to avoid circular dep
+
+    rows = conn.execute(
+        text("SELECT id, content FROM emails WHERE preview_image_url IS NULL")
+    ).fetchall()
+    for row_id, content in rows:
+        try:
+            msg = email.message_from_bytes(content)
+            preview = reader.extract_preview_image(msg)
+        except Exception:
+            preview = None
+            logging.warning(f"preview backfill: extraction failed for id={row_id}")
+        conn.execute(
+            text("UPDATE emails SET preview_image_url = :p WHERE id = :id"),
+            {"p": preview, "id": row_id},
+        )
+    conn.commit()
+    logging.info(f"preview_image_url backfill complete: {len(rows)} rows processed")
+
+
 # Run migration on startup
 migrate_database()
 
@@ -196,17 +232,24 @@ def save_email(
             )
             session.add(new_email)
             session.commit()
-            # After commit we know new_email.id — write matching FTS row
+            # After commit we know new_email.id — write matching FTS row + preview URL
             try:
                 msg = email.message_from_bytes(content)
                 body_text = reader.extract_plain_text(msg)
+                preview = reader.extract_preview_image(msg)
             except Exception:
                 body_text = ""
-                logging.warning(f"save_email: failed to extract body_text for email_id={email_id}")
+                preview = None
+                logging.warning(f"save_email: extraction failed for email_id={email_id}")
             session.execute(
                 text("INSERT INTO emails_fts(rowid, subject, body_text) VALUES (:id, :s, :b)"),
                 {"id": new_email.id, "s": _html_escape.escape(subject or ""), "b": body_text},
             )
+            if preview is not None:
+                session.execute(
+                    text("UPDATE emails SET preview_image_url = :p WHERE id = :id"),
+                    {"p": preview, "id": new_email.id},
+                )
             session.commit()
         else:
             print(f"Email with id {email_id} already exists. Discarding.")
