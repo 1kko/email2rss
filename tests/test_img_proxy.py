@@ -214,12 +214,97 @@ def test_fetch_image_rejects_oversized(monkeypatch):
 
 
 def test_fetch_image_rejects_non_200(monkeypatch):
+    """404 (and any non-redirect, non-200) → 502."""
     def fake_getaddrinfo(host, port, **kw):
         return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", port))]
     monkeypatch.setattr(socket, "getaddrinfo", fake_getaddrinfo)
 
     def fake_send(session, req, **kw):
-        return _fake_response(302, {"Location": "http://other/"}, [])
+        return _fake_response(404, {}, [])
+    monkeypatch.setattr("requests.Session.send", fake_send)
+
+    with pytest.raises(HTTPException) as ei:
+        img_proxy.fetch_image("http://example.com/x", TEST_SECRET)
+    assert ei.value.code == 502
+
+
+def test_fetch_image_follows_redirect_to_image(monkeypatch):
+    """302 with valid Location → we re-validate and fetch the target."""
+    def fake_getaddrinfo(host, port, **kw):
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", port))]
+    monkeypatch.setattr(socket, "getaddrinfo", fake_getaddrinfo)
+
+    png_body = b"\x89PNG\r\n\x1a\n" + b"\x00" * 50
+    hops = []
+
+    def fake_send(session, req, **kw):
+        hops.append(req.url)
+        if len(hops) == 1:
+            return _fake_response(
+                301, {"Location": "https://cdn.example.com/real.png"}, []
+            )
+        return _fake_response(200, {"Content-Type": "image/png"}, [png_body])
+
+    monkeypatch.setattr("requests.Session.send", fake_send)
+
+    body, ctype = img_proxy.fetch_image(
+        "https://www.google.com/s2/favicons?domain=x.com", TEST_SECRET
+    )
+    assert body == png_body
+    assert ctype == "image/png"
+    assert len(hops) == 2
+
+
+def test_fetch_image_redirect_to_private_ip_rejected(monkeypatch):
+    """Redirect Location resolving to a private IP must be rejected (SSRF via 3xx)."""
+    call_count = {"n": 0}
+
+    def fake_getaddrinfo(host, port, **kw):
+        call_count["n"] += 1
+        # First hop (cdn.example.com) is public; second hop (internal) is private.
+        if call_count["n"] == 1:
+            return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", port))]
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("10.0.0.5", port))]
+
+    monkeypatch.setattr(socket, "getaddrinfo", fake_getaddrinfo)
+
+    def fake_send(session, req, **kw):
+        return _fake_response(
+            302, {"Location": "http://internal.corp/secret.png"}, []
+        )
+
+    monkeypatch.setattr("requests.Session.send", fake_send)
+
+    with pytest.raises(HTTPException) as ei:
+        img_proxy.fetch_image("http://cdn.example.com/x.png", TEST_SECRET)
+    assert ei.value.code == 403
+
+
+def test_fetch_image_too_many_redirects(monkeypatch):
+    """Redirect chain longer than MAX_REDIRECTS → 502."""
+    def fake_getaddrinfo(host, port, **kw):
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", port))]
+    monkeypatch.setattr(socket, "getaddrinfo", fake_getaddrinfo)
+
+    def fake_send(session, req, **kw):
+        return _fake_response(302, {"Location": "http://example.com/next"}, [])
+
+    monkeypatch.setattr("requests.Session.send", fake_send)
+
+    with pytest.raises(HTTPException) as ei:
+        img_proxy.fetch_image("http://example.com/start", TEST_SECRET)
+    assert ei.value.code == 502
+
+
+def test_fetch_image_redirect_without_location(monkeypatch):
+    """3xx without Location header → 502 (malformed upstream)."""
+    def fake_getaddrinfo(host, port, **kw):
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", port))]
+    monkeypatch.setattr(socket, "getaddrinfo", fake_getaddrinfo)
+
+    def fake_send(session, req, **kw):
+        return _fake_response(301, {}, [])
+
     monkeypatch.setattr("requests.Session.send", fake_send)
 
     with pytest.raises(HTTPException) as ei:
