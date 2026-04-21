@@ -154,6 +154,54 @@ def create_app() -> Flask:
             logging.exception(f"Error serving article {feed_name}/{guid}")
             abort(500)
 
+    def _assert_same_origin():
+        origin = request.headers.get("Origin")
+        if not origin:
+            return  # absent means non-browser caller (curl, test client) — allow
+        baseurl = (config.get("server_baseurl") or "").rstrip("/")
+        if baseurl and origin != baseurl:
+            abort(403)
+
+    @app.post("/article/<feed_name>/<guid>/read")
+    def mark_article_read(feed_name, guid):
+        _assert_same_origin()
+        sender_email = feed_name_to_email(feed_name)
+        record = db.get_email_by_guid(sender_email, guid)
+        if not record:
+            abort(404)
+        db.mark_read(record.id, True)
+        return jsonify({"is_read": True})
+
+    @app.delete("/article/<feed_name>/<guid>/read")
+    def unmark_article_read(feed_name, guid):
+        _assert_same_origin()
+        sender_email = feed_name_to_email(feed_name)
+        record = db.get_email_by_guid(sender_email, guid)
+        if not record:
+            abort(404)
+        db.mark_read(record.id, False)
+        return jsonify({"is_read": False})
+
+    @app.post("/article/<feed_name>/<guid>/star")
+    def mark_article_starred(feed_name, guid):
+        _assert_same_origin()
+        sender_email = feed_name_to_email(feed_name)
+        record = db.get_email_by_guid(sender_email, guid)
+        if not record:
+            abort(404)
+        db.mark_starred(record.id, True)
+        return jsonify({"is_starred": True})
+
+    @app.delete("/article/<feed_name>/<guid>/star")
+    def unmark_article_starred(feed_name, guid):
+        _assert_same_origin()
+        sender_email = feed_name_to_email(feed_name)
+        record = db.get_email_by_guid(sender_email, guid)
+        if not record:
+            abort(404)
+        db.mark_starred(record.id, False)
+        return jsonify({"is_starred": False})
+
     @app.get("/")
     def index():
         try:

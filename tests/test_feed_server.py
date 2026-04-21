@@ -216,3 +216,90 @@ def test_main_aborts_when_reader_enabled_without_baseurl(monkeypatch):
 
     with pytest.raises(RuntimeError, match="server_baseurl"):
         feed_server.main()
+
+
+def _guid_for_default_fixture():
+    """Compute the GUID for insert_email's default values."""
+    import hashlib
+    return hashlib.md5(
+        ("Hello from the test suite"
+         + "Mon, 13 Apr 2026 10:00:00 +0000"
+         + "sender@example.com").encode(),
+        usedforsecurity=False,
+    ).hexdigest()
+
+
+def test_mark_read_route_sets_flag(client, db_session):
+    from tests.conftest import insert_email
+    row = insert_email(db_session, email_id=1)
+    guid = _guid_for_default_fixture()
+
+    resp = client.post(f"/article/sender_example_com/{guid}/read")
+    assert resp.status_code == 200
+    assert resp.get_json() == {"is_read": True}
+
+    refreshed = db_session.query(feed_server.db.Email).filter_by(id=row.id).one()
+    assert refreshed.is_read is True
+
+
+def test_unmark_read_route_clears_flag(client, db_session):
+    from tests.conftest import insert_email
+    row = insert_email(db_session, email_id=1)
+    feed_server.db.mark_read(row.id, True)
+    guid = _guid_for_default_fixture()
+
+    resp = client.delete(f"/article/sender_example_com/{guid}/read")
+    assert resp.status_code == 200
+    assert resp.get_json() == {"is_read": False}
+
+
+def test_star_route_sets_flag(client, db_session):
+    from tests.conftest import insert_email
+    insert_email(db_session, email_id=1)
+    guid = _guid_for_default_fixture()
+
+    resp = client.post(f"/article/sender_example_com/{guid}/star")
+    assert resp.status_code == 200
+    assert resp.get_json() == {"is_starred": True}
+
+
+def test_unstar_route_clears_flag(client, db_session):
+    from tests.conftest import insert_email
+    row = insert_email(db_session, email_id=1)
+    feed_server.db.mark_starred(row.id, True)
+    guid = _guid_for_default_fixture()
+
+    resp = client.delete(f"/article/sender_example_com/{guid}/star")
+    assert resp.status_code == 200
+    assert resp.get_json() == {"is_starred": False}
+
+
+def test_mark_read_route_404s_for_unknown_guid(client, db_session):
+    from tests.conftest import insert_email
+    insert_email(db_session, email_id=1)
+    resp = client.post("/article/sender_example_com/nonexistentguid123/read")
+    assert resp.status_code == 404
+
+
+def test_star_route_rejects_cross_origin(client, db_session, monkeypatch):
+    from tests.conftest import insert_email
+    insert_email(db_session, email_id=1)
+    guid = _guid_for_default_fixture()
+
+    monkeypatch.setitem(feed_server.config, "server_baseurl", "http://testserver")
+
+    resp = client.post(
+        f"/article/sender_example_com/{guid}/star",
+        headers={"Origin": "https://evil.example"},
+    )
+    assert resp.status_code == 403
+
+
+def test_star_route_allows_missing_origin(client, db_session):
+    """No Origin header (e.g. curl) is allowed through."""
+    from tests.conftest import insert_email
+    insert_email(db_session, email_id=1)
+    guid = _guid_for_default_fixture()
+
+    resp = client.post(f"/article/sender_example_com/{guid}/star")
+    assert resp.status_code == 200

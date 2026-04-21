@@ -26,6 +26,7 @@ config = {
     "bind_address": os.getenv("bind_address", "127.0.0.1"),
     "img_proxy_secret": None,  # populated lazily by get_img_proxy_secret()
     "retention_days": int(os.getenv("retention_days", "0")) or None,
+    "read_after_seconds": int(os.getenv("read_after_seconds", "5")),
 }
 
 
