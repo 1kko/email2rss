@@ -67,6 +67,28 @@ class PinnedIPAdapter(HTTPAdapter):
             **pool_kwargs,
         )
 
+    def get_connection_with_tls_context(self, request, verify, proxies=None, cert=None):
+        """
+        Inject SNI + cert-hostname assertion for the original hostname.
+
+        After PinnedIPAdapter.send() rewrites the URL to the pinned IP, urllib3
+        would otherwise use that IP as TLS server_hostname — cert validation fails
+        because the remote cert is issued to the real hostname, not the IP.
+        We explicitly set server_hostname and assert_hostname back to the real
+        hostname so TLS works correctly while the TCP connection still goes to
+        the pre-validated IP.
+        """
+        conn = super().get_connection_with_tls_context(
+            request, verify, proxies=proxies, cert=cert
+        )
+        # urllib3 HTTPSConnectionPool stores conn_kw as a dict of kwargs forwarded
+        # to each new HTTPSConnection. Copy-on-write to avoid mutating a shared pool.
+        if hasattr(conn, "conn_kw"):
+            conn.conn_kw = dict(conn.conn_kw or {})
+            conn.conn_kw["server_hostname"] = self.pinned_host
+            conn.conn_kw["assert_hostname"] = self.pinned_host
+        return conn
+
     def send(self, request, **kwargs):
         # Rewrite the URL to target the pinned IP; preserve hostname via Host header
         parsed = urlparse(request.url)
