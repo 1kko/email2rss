@@ -1,15 +1,19 @@
 {% extends "base.html" %}
 {% block title %}{{ subject }}{% endblock %}
 {% block body %}
-<article>
+<article class="article">
   <header>
     <h1>{{ subject }}</h1>
     <p class="meta">From: {{ sender }} | Date: {{ date }}</p>
   </header>
-  <div class="content">
-    {# content is pre-sanitized via util.sanitize_html #}
-    {{ content|safe }}
-  </div>
+  <iframe
+    id="email-body"
+    class="email-body-iframe"
+    sandbox="allow-popups allow-popups-to-escape-sandbox"
+    srcdoc="{{ iframe_document|e }}"
+    referrerpolicy="no-referrer"
+    loading="lazy"
+    title="Email body"
+  ></iframe>
 </article>
-<script src="{{ url_for('static', filename='reader.js') }}"></script>
 {% endblock %}
