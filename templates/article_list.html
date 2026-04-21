@@ -1,29 +1,42 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <title>{% block title %}{{ page_title }}{% endblock %}</title>
-</head>
-<body>
-{% if filter_mode %}<!-- filter: {{ filter_mode }} -->{% endif %}
-<article>
-  {% if specific_sender %}
-    <header>
-      <h1>Articles from {{ specific_sender }}</h1>
-    </header>
+{% extends "base.html" %}
+{% block title %}{{ page_title }}{% endblock %}
+{% block body %}
+<h1>{{ page_title }}</h1>
+
+{% if specific_sender %}
+  {% set base_path = '/article/' ~ articles[0].feed_name if articles else '/article' %}
+{% else %}
+  {% set base_path = '/article' %}
+{% endif %}
+<nav class="filter-chips">
+  <a href="{{ base_path }}?filter=all"
+     class="chip {% if filter_mode == 'all' %}active{% endif %}">All</a>
+  <a href="{{ base_path }}?filter=unread"
+     class="chip {% if filter_mode == 'unread' %}active{% endif %}">Unread</a>
+  <a href="{{ base_path }}?filter=starred"
+     class="chip {% if filter_mode == 'starred' %}active{% endif %}">Starred</a>
+</nav>
+
+<ul class="article-list">
+  {% for article in articles %}
+    <li class="{% if not article.is_read %}unread{% endif %}">
+      {% if article.is_starred %}<span class="star">★</span>{% endif %}
+      <a href="/article/{{ article.feed_name }}/{{ article.guid }}">{{ article.subject }}</a>
+      <span class="meta">{{ article.sender }} · {{ article.date }}</span>
+    </li>
   {% else %}
-    <header>
-      <h1>All Articles</h1>
-    </header>
-  {% endif %}
-  <ul class="article-items">
-    {% for article in articles %}
-      <li{% if not article.is_read %} class="unread"{% endif %}>
-        <a href="/article/{{ article.feed_name }}/{{ article.guid }}" class="article-title">{{ article.subject }}</a>
-        <span class="meta">From: {{ article.sender }} | Date: {{ article.date or '' }}</span>
-      </li>
-    {% endfor %}
-  </ul>
-</article>
-</body>
-</html>
+    <li class="empty">No articles match this filter.</li>
+  {% endfor %}
+</ul>
+
+{% if senders %}
+  <aside class="senders">
+    <h2>Senders</h2>
+    <ul>
+      {% for sender_email, info in senders %}
+        <li><a href="/article/{{ info.feed_name }}">{{ sender_email }}</a> <span class="count">({{ info.count }})</span></li>
+      {% endfor %}
+    </ul>
+  </aside>
+{% endif %}
+{% endblock %}
