@@ -41,28 +41,35 @@ _emails_received = _meter.create_counter(
 
 def connect_to_gmail(imap_server, username, password, mailbox="INBOX"):
     """
-    Connects to Gmail using the provided username and password.
+    Connects to the IMAP server with exponential backoff on transient failures.
 
-    Args:
-        username (str): The Gmail username.
-        password (str): The Gmail password.
+    Retries up to 4 times total with delays [0, 1, 2, 4] seconds between attempts.
+    Retries on `imaplib.IMAP4.error` (which covers `imaplib.IMAP4.abort`) and
+    `OSError` (network issues). Other exceptions propagate unchanged.
 
     Returns:
-        imaplib.IMAP4_SSL: The connected IMAP4_SSL object.
+        imaplib.IMAP4_SSL: The connected and mailbox-selected IMAP object.
 
     Raises:
-        Exception: If there is an error connecting to Gmail.
-
+        imaplib.IMAP4.error | OSError: If all retries fail.
     """
-    try:
-        mail = imaplib.IMAP4_SSL(imap_server)
-        mail.login(username, password)
-        mail.select(mailbox)
-        logging.info(f"Connected to Email and selected {mailbox}.")
-        return mail
-    except Exception as e:
-        logging.error(f"Failed to connect to Gmail: {e}")
-        raise
+    delays = [0, 1, 2, 4]
+    last_err: Exception | None = None
+    for attempt, delay in enumerate(delays):
+        if delay:
+            time.sleep(delay)
+        try:
+            mail = imaplib.IMAP4_SSL(imap_server)
+            mail.login(username, password)
+            mail.select(mailbox)
+            logging.info(f"Connected to IMAP and selected {mailbox} (attempt {attempt + 1}).")
+            return mail
+        except (imaplib.IMAP4.error, OSError) as e:
+            last_err = e
+            logging.warning(f"IMAP connect attempt {attempt + 1} failed: {e}")
+    logging.error(f"IMAP connect failed after {len(delays)} attempts: {last_err}")
+    assert last_err is not None  # noqa: S101 — loop always runs ≥1 iteration
+    raise last_err
 
 
 def fetch_emails(mail, since=10):
