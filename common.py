@@ -5,7 +5,6 @@ Common functions and variables used by multiple scripts.
 import os
 import logging
 import secrets
-import stat
 from logging.handlers import TimedRotatingFileHandler
 from pathlib import Path as _Path
 
@@ -25,6 +24,7 @@ config = {
     "server_baseurl": os.getenv("server_baseurl"),
     "enable_internal_reader": os.getenv("enable_internal_reader", "false").lower() == "true",
     "bind_address": os.getenv("bind_address", "127.0.0.1"),
+    "img_proxy_secret": None,  # populated lazily by get_img_proxy_secret()
 }
 
 
@@ -47,8 +47,19 @@ def _load_or_create_img_proxy_secret() -> bytes:
 
     secret_path.parent.mkdir(parents=True, exist_ok=True)
     generated = secrets.token_urlsafe(32).encode("ascii")
-    secret_path.write_bytes(generated)
-    secret_path.chmod(stat.S_IRUSR | stat.S_IWUSR)  # 0600
+    try:
+        fd = os.open(
+            str(secret_path),
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+            0o600,
+        )
+    except FileExistsError:
+        # Another worker won the race — read what they wrote.
+        return secret_path.read_bytes()
+    try:
+        os.write(fd, generated)
+    finally:
+        os.close(fd)
     return generated
 
 
@@ -61,15 +72,9 @@ def validate_reader_config() -> None:
         )
 
 
-# Secret is loaded lazily — on first access via config["img_proxy_secret"]
-# to avoid side effects at module import. Tests that need the secret call
-# _load_or_create_img_proxy_secret() directly or access config["img_proxy_secret"].
-config["img_proxy_secret"] = None  # populated by get_img_proxy_secret()
-
-
 def get_img_proxy_secret() -> bytes:
     """Cache-on-demand accessor for the HMAC secret."""
-    if not config["img_proxy_secret"]:
+    if config["img_proxy_secret"] is None:
         config["img_proxy_secret"] = _load_or_create_img_proxy_secret()
     return config["img_proxy_secret"]
 
