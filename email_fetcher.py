@@ -156,6 +156,14 @@ def main():
     userpw = config.get("userpw")
     mailbox = config.get("mailbox")
 
+    # Retention purge — runs before the fetch so we don't delete just-fetched rows
+    retention_days = config.get("retention_days")
+    if retention_days:
+        cutoff = datetime.datetime.utcnow() - datetime.timedelta(days=retention_days)
+        deleted = db.delete_emails_older_than(cutoff)
+        if deleted:
+            logging.info(f"Retention: purged {deleted} emails older than {retention_days} days.")
+
     # if emails.db does not exist since should be 30, otherwise 1
     # 30 to populate the rss feed for the first time
     since = 1
