@@ -169,10 +169,9 @@ def create_app() -> Flask:
             cleaned = reader.clean_and_rewrite(body_html, cid_map, _sign)
             iframe_document = reader.render_iframe_document(cleaned, proxy_origin)
 
-            # Fetch state (is_read, is_starred) for the template
-            state_record = db.get_email_by_guid_with_state(sender_email, guid)
-            is_read = state_record.is_read if state_record else False
-            is_starred = state_record.is_starred if state_record else False
+            # State attributes are already loaded on `record` (eager via get_email_by_guid's .all())
+            is_read = record.is_read
+            is_starred = record.is_starred
 
             return render_template(
                 "article.html",

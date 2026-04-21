@@ -5,6 +5,7 @@ Database module for the application.
 import datetime
 import email
 import hashlib
+import html as _html_escape
 import sqlite3
 
 from sqlalchemy import create_engine, event, Column, Integer, String, Text, DateTime, BLOB, Index, Boolean, text
@@ -159,7 +160,7 @@ def _backfill_fts_index(conn):
             logging.warning(f"FTS backfill: failed to extract body_text for id={row_id}")
         conn.execute(
             text("INSERT INTO emails_fts(rowid, subject, body_text) VALUES (:id, :s, :b)"),
-            {"id": row_id, "s": subject or "", "b": body_text},
+            {"id": row_id, "s": _html_escape.escape(subject or ""), "b": body_text},
         )
     conn.commit()
     logging.info(f"FTS backfill complete: {len(rows)} rows indexed")
@@ -204,7 +205,7 @@ def save_email(
                 logging.warning(f"save_email: failed to extract body_text for email_id={email_id}")
             session.execute(
                 text("INSERT INTO emails_fts(rowid, subject, body_text) VALUES (:id, :s, :b)"),
-                {"id": new_email.id, "s": subject or "", "b": body_text},
+                {"id": new_email.id, "s": _html_escape.escape(subject or ""), "b": body_text},
             )
             session.commit()
         else:
