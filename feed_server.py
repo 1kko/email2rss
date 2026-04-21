@@ -12,11 +12,12 @@ import ssl
 from pathlib import Path
 
 from flask import Flask, Response, abort, jsonify, render_template, request, send_from_directory
+from werkzeug.exceptions import HTTPException
 
 import database as db
 import img_proxy
+import reader
 from common import logging, config, get_img_proxy_secret
-from util import cleanse_content, sanitize_html
 
 
 PROJECT_ROOT = Path(__file__).parent
@@ -36,44 +37,6 @@ def feed_name_to_email(feed_name: str) -> str:
     return feed_name.replace("_", "@", 1).replace("_", ".")
 
 
-def extract_article_content(msg) -> str:
-    html_content: str | None = None
-    text_content: str | None = None
-
-    if msg.is_multipart():
-        for part in msg.walk():
-            content_disposition = str(part.get("Content-Disposition"))
-            if "attachment" in content_disposition:
-                continue
-            charset = part.get_content_charset() or "utf-8"
-            payload = part.get_payload(decode=True)
-            if not payload:
-                continue
-            try:
-                decoded = payload.decode(charset, errors="ignore")
-            except Exception:
-                logging.debug("Skipping unparseable MIME part")
-                continue
-            ctype = part.get_content_type()
-            if ctype == "text/html":
-                html_content = cleanse_content(decoded)
-            elif ctype == "text/plain" and html_content is None:
-                text_content = cleanse_content(decoded)
-    else:
-        charset = msg.get_content_charset() or "utf-8"
-        payload = msg.get_payload(decode=True)
-        if payload:
-            decoded = payload.decode(charset, errors="ignore")
-            if msg.get_content_type() == "text/html":
-                html_content = cleanse_content(decoded)
-            elif msg.get_content_type() == "text/plain":
-                text_content = cleanse_content(decoded)
-
-    content = html_content if html_content else (text_content or "")
-    if not html_content and text_content:
-        content = f"<pre>{content}</pre>"
-    return sanitize_html(content)
-
 
 def _attach_feed_names(articles):
     return [{**a, "feed_name": sanitize_feed_name(a["sender"])} for a in articles]
@@ -91,7 +54,7 @@ def create_app() -> Flask:
     def _security_headers(response):
         response.headers.setdefault(
             "Content-Security-Policy",
-            "default-src 'self'; img-src * data:; style-src 'self' 'unsafe-inline'",
+            "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; frame-src 'self'",
         )
         response.headers.setdefault("X-Content-Type-Options", "nosniff")
         response.headers.setdefault("X-Frame-Options", "DENY")
@@ -163,14 +126,30 @@ def create_app() -> Flask:
                 abort(404)
 
             msg = email_mod.message_from_bytes(record.content)
-            subject = str(email_mod.header.make_header(email_mod.header.decode_header(msg["subject"])))
+            subject = str(email_mod.header.make_header(
+                email_mod.header.decode_header(msg["subject"])
+            ))
+            body_html, cid_map = reader.extract_body_and_cid_map(msg)
+
+            proxy_base = (config.get("server_baseurl") or "").rstrip("/")
+            proxy_origin = proxy_base  # origin = baseurl for signed /img
+            secret = get_img_proxy_secret()
+
+            def _sign(url):
+                return img_proxy.sign_url(url, secret, proxy_base)
+
+            cleaned = reader.clean_and_rewrite(body_html, cid_map, _sign)
+            iframe_document = reader.render_iframe_document(cleaned, proxy_origin)
+
             return render_template(
                 "article.html",
                 subject=subject,
                 sender=sender_email,
                 date=msg["date"] or "",
-                content=extract_article_content(msg),
+                iframe_document=iframe_document,
             )
+        except HTTPException:
+            raise
         except Exception:
             logging.exception(f"Error serving article {feed_name}/{guid}")
             abort(500)

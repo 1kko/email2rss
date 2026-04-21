@@ -1,16 +1,11 @@
-"""Route tests for feed_server.py.
-
-Two tests (test_article_route_swallows_404_as_500_*) are characterization
-tests that pin a known bug: abort(404) inside view_article is swallowed by
-a broad `except Exception` handler and re-raised as 500. These tests should
-be updated to assert 404 when the bug is fixed.
-"""
+"""Route tests for feed_server.py."""
 import base64 as _b64mod
 import hashlib
 import socket as _socket_mod
 
 from defusedxml.ElementTree import fromstring as safe_fromstring
 
+import feed_server
 from tests.conftest import insert_email
 
 
@@ -66,39 +61,40 @@ def test_subscriptions_opml_served_when_present(client, tmp_path):
     assert root.tag == "opml"
 
 
-def test_article_route_swallows_404_as_500_when_guid_unknown(client, db_session):
+def test_article_route_404s_when_guid_unknown(client, db_session):
     insert_email(db_session, email_id=1)
     resp = client.get("/article/sender_example_com/nonexistent_guid")
-    # BUG feed_server.py view_article — `try/except Exception` catches the NotFound
-    # raised by abort(404) and re-aborts as 500. Characterized here; fix should
-    # narrow the catch (e.g., `except HTTPException: raise`) and flip assertion.
-    assert resp.status_code == 500
+    assert resp.status_code == 404
 
 
-def test_article_route_renders_email_body(client, db_session):
+def test_article_route_renders_body_in_sandboxed_iframe(client, db_session, monkeypatch):
+    from tests.conftest import insert_email
+    monkeypatch.setitem(feed_server.config, "enable_internal_reader", True)
+    monkeypatch.setitem(feed_server.config, "server_baseurl", "http://testserver")
+
+    insert_email(db_session, email_id=1)
+
+    # Build the GUID using the known fixture values
+    import hashlib
     subject = "Hello from the test suite"
     date_str = "Mon, 13 Apr 2026 10:00:00 +0000"
     sender = "sender@example.com"
-    # insert_email rewrites From to the bare sender address; GUID matches that
-    guid = _expected_guid(subject, date_str, sender)
-
-    insert_email(db_session, email_id=1)
+    guid = hashlib.md5(
+        (subject + date_str + sender).encode(), usedforsecurity=False
+    ).hexdigest()
 
     resp = client.get(f"/article/sender_example_com/{guid}")
     assert resp.status_code == 200
-    assert resp.mimetype == "text/html"
-    body = resp.data.decode("utf-8")
-    # Subject rendered into the template; sender email also rendered as metadata
-    assert "Hello from the test suite" in body
-    assert sender in body
+    html = resp.data.decode("utf-8")
+    assert '<iframe' in html
+    assert 'sandbox="allow-popups allow-popups-to-escape-sandbox"' in html
+    assert 'srcdoc=' in html
+    assert "Hello from the test suite" in html  # subject in header
 
 
-def test_article_route_swallows_404_as_500_for_unknown_feed(client, db_session):
+def test_article_route_404s_for_unknown_feed(client, db_session):
     resp = client.get("/article/who_knows_com/abcdef")
-    # BUG feed_server.py view_article — `try/except Exception` catches the NotFound
-    # raised by abort(404) and re-aborts as 500. Characterized here; fix should
-    # narrow the catch (e.g., `except HTTPException: raise`) and flip assertion.
-    assert resp.status_code == 500
+    assert resp.status_code == 404
 
 
 def _build_signed_img_url(original_url, secret):
@@ -155,3 +151,50 @@ def test_img_route_happy_path(client, monkeypatch):
     assert resp.headers.get("Cache-Control", "").startswith("public")
     assert resp.headers.get("X-Content-Type-Options") == "nosniff"
     assert resp.data == png
+
+
+def test_article_route_srcdoc_contains_inner_csp(client, db_session, monkeypatch):
+    from tests.conftest import insert_email
+    monkeypatch.setitem(feed_server.config, "enable_internal_reader", True)
+    monkeypatch.setitem(feed_server.config, "server_baseurl", "http://testserver")
+
+    insert_email(db_session, email_id=1)
+    import hashlib
+    guid = hashlib.md5(
+        ("Hello from the test suite"
+         + "Mon, 13 Apr 2026 10:00:00 +0000"
+         + "sender@example.com").encode(),
+        usedforsecurity=False,
+    ).hexdigest()
+
+    resp = client.get(f"/article/sender_example_com/{guid}")
+    html = resp.data.decode("utf-8")
+    # The srcdoc attribute has HTML-escaped content; decode entities:
+    import html as html_mod
+    srcdoc_start = html.index('srcdoc="') + len('srcdoc="')
+    srcdoc_end = html.index('"', srcdoc_start)
+    srcdoc_escaped = html[srcdoc_start:srcdoc_end]
+    srcdoc_decoded = html_mod.unescape(srcdoc_escaped)
+    assert "default-src 'none'" in srcdoc_decoded
+    assert "img-src http://testserver data:" in srcdoc_decoded
+
+
+def test_article_route_has_tightened_outer_csp(client, db_session, monkeypatch):
+    from tests.conftest import insert_email
+    monkeypatch.setitem(feed_server.config, "enable_internal_reader", True)
+    monkeypatch.setitem(feed_server.config, "server_baseurl", "http://testserver")
+
+    insert_email(db_session, email_id=1)
+    import hashlib
+    guid = hashlib.md5(
+        ("Hello from the test suite"
+         + "Mon, 13 Apr 2026 10:00:00 +0000"
+         + "sender@example.com").encode(),
+        usedforsecurity=False,
+    ).hexdigest()
+
+    resp = client.get(f"/article/sender_example_com/{guid}")
+    csp = resp.headers.get("Content-Security-Policy", "")
+    assert "img-src 'self' data:" in csp
+    assert "img-src *" not in csp
+    assert "frame-src 'self'" in csp
