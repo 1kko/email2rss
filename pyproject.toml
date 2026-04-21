@@ -26,6 +26,7 @@ dependencies = [
     "opentelemetry-instrumentation-logging>=0.50b0,<1.0",
     "requests (>=2.33.0)",
     "bleach (>=6.2,<7)",
+    "tinycss2 (>=1.5.1,<2.0.0)",
 ]
 readme = "README.md"
 requires-python = ">= 3.10"
