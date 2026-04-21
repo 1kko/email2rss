@@ -1,13 +1,16 @@
 version: 2
+# Dependabot security alerts remain active (separate from PR creation).
+# Routine version-bump PRs are disabled via open-pull-requests-limit: 0.
+# Check the Security tab in GitHub for vulnerability alerts and bump manually.
 updates:
   - package-ecosystem: pip
     directory: /
     schedule:
       interval: weekly
-    open-pull-requests-limit: 10
+    open-pull-requests-limit: 0
 
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: weekly
-    open-pull-requests-limit: 5
+    open-pull-requests-limit: 0
