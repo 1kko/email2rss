@@ -64,11 +64,6 @@ def test_verify_signature_is_timing_safe():
         assert spy.called
 
 
-def _signed_param(url: str) -> tuple[str, str]:
-    u = _b64(url)
-    return u, img_proxy._compute_sig(u, TEST_SECRET)
-
-
 def test_fetch_image_rejects_non_http_scheme():
     with pytest.raises(HTTPException) as ei:
         img_proxy.fetch_image("file:///etc/passwd", TEST_SECRET)
@@ -129,8 +124,17 @@ def test_fetch_image_rejects_when_any_resolved_ip_is_private(monkeypatch):
 
 def _fake_response(status, headers, body_chunks):
     """Return a minimal duck-typed response for requests.Session.send patching."""
+    class _FakeRaw:
+        """Stub for r.raw — just enough for extract_cookies_to_jar to no-op."""
+        _original_response = None
+
     class R:
         status_code = status
+        # Attributes needed when the response passes through Session.send
+        # (used when patching at HTTPAdapter.send level rather than Session.send)
+        is_redirect = False
+        history = []
+        raw = _FakeRaw()
 
         def __init__(self):
             self.headers = headers
@@ -151,13 +155,14 @@ def test_fetch_image_happy_path_png(monkeypatch):
 
     png_body = b"\x89PNG\r\n\x1a\n" + b"\x00" * 100
 
-    def fake_send(session, req, **kw):
-        assert req.url.startswith("http://93.184.216.34/") or req.url.startswith("http://example.com/")
-        # We accept either, because the adapter may rewrite the URL
-        assert req.headers.get("Host") == "example.com" or "Host" not in req.headers
+    def fake_send(adapter, req, **kw):
+        # PinnedIPAdapter MUST rewrite the URL to the pinned IP
+        assert req.url.startswith("http://93.184.216.34:80/"), f"expected pinned IP URL, got {req.url}"
+        # ...and MUST preserve the original hostname in the Host header
+        assert req.headers.get("Host") == "example.com", f"expected Host=example.com, got {req.headers.get('Host')}"
         return _fake_response(200, {"Content-Type": "image/png"}, [png_body])
 
-    monkeypatch.setattr("requests.Session.send", fake_send)
+    monkeypatch.setattr("requests.adapters.HTTPAdapter.send", fake_send)
 
     body, ctype = img_proxy.fetch_image("http://example.com/x.png", TEST_SECRET)
     assert body == png_body
@@ -236,3 +241,23 @@ def test_fetch_image_timeout_becomes_502(monkeypatch):
     with pytest.raises(HTTPException) as ei:
         img_proxy.fetch_image("http://example.com/x", TEST_SECRET)
     assert ei.value.code == 502
+
+
+def test_fetch_image_rejects_cgnat(monkeypatch):
+    """100.64.0.0/10 is CGNAT; not is_private on Python 3.11+, but not is_global either."""
+    def fake_getaddrinfo(host, port, **kw):
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("100.64.0.1", port))]
+    monkeypatch.setattr(socket, "getaddrinfo", fake_getaddrinfo)
+    with pytest.raises(HTTPException) as ei:
+        img_proxy.fetch_image("http://cgnat.example.com/x.png", TEST_SECRET)
+    assert ei.value.code == 403
+
+
+def test_fetch_image_rejects_documentation_range(monkeypatch):
+    """192.0.2.0/24 is TEST-NET-1 per RFC 5737; not is_global."""
+    def fake_getaddrinfo(host, port, **kw):
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("192.0.2.1", port))]
+    monkeypatch.setattr(socket, "getaddrinfo", fake_getaddrinfo)
+    with pytest.raises(HTTPException) as ei:
+        img_proxy.fetch_image("http://docs.example.com/x.png", TEST_SECRET)
+    assert ei.value.code == 403

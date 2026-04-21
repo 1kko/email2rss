@@ -80,7 +80,17 @@ class PinnedIPAdapter(HTTPAdapter):
 
 
 def _is_public_ip(ip_str: str) -> bool:
-    ip = ipaddress.ip_address(ip_str)
+    """
+    True only for unambiguously public, routable IPs.
+
+    Using `not ip.is_global` catches CGNAT (100.64.0.0/10), documentation ranges,
+    benchmark ranges, etc. — which Python 3.11+ no longer classifies as
+    `is_private`. We keep the explicit checks for future-proofing and clarity.
+    """
+    try:
+        ip = ipaddress.ip_address(ip_str)
+    except ValueError:
+        return False  # malformed → treat as non-public; caller will abort(403)
     return not (
         ip.is_private
         or ip.is_loopback
@@ -88,6 +98,7 @@ def _is_public_ip(ip_str: str) -> bool:
         or ip.is_reserved
         or ip.is_multicast
         or ip.is_unspecified
+        or not ip.is_global
     )
 
 
