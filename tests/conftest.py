@@ -109,23 +109,40 @@ def insert_email(
     date_str: str = "Mon, 13 Apr 2026 10:00:00 +0000",
     content: bytes | None = None,
     timestamp=None,
+    inline_images: dict[str, tuple[str, bytes]] | None = None,
 ):
     """
-    Helper: insert an email row.
-
-    When `content` is omitted, the canonical multipart MIME sample is loaded
-    and its Subject/Date/From headers are rewritten to match the caller's
-    arguments. The rewritten From header uses the bare `sender` address
-    (no display name) so tests can compute the GUID as
-    `md5(subject + date_str + sender)` — matching what `database` and
-    `feed_generator` compute from `msg["from"]`.
+    Helper: insert an email row. When `content` is omitted, the canonical multipart
+    MIME sample is loaded and headers rewritten. `inline_images` optionally builds
+    a multipart/related wrapper with inline parts keyed by Content-ID.
     """
     if content is None:
         msg = email_mod.message_from_bytes(_load_sample_eml())
         msg.replace_header("Subject", subject)
         msg.replace_header("Date", date_str)
         msg.replace_header("From", sender)
-        content = msg.as_bytes()
+        if inline_images:
+            from email.mime.multipart import MIMEMultipart
+            from email.mime.image import MIMEImage
+            related = MIMEMultipart("related")
+            for h in ("From", "To", "Subject", "Date", "MIME-Version"):
+                if msg[h]:
+                    related[h] = msg[h]
+            # Preserve the original alternative body as the first related part
+            alt_payload = msg.get_payload()
+            alternative = MIMEMultipart("alternative")
+            for part in alt_payload:
+                alternative.attach(part)
+            related.attach(alternative)
+            for cid, (ctype, raw_bytes) in inline_images.items():
+                _maintype, _subtype = ctype.split("/", 1)
+                img = MIMEImage(raw_bytes, _subtype=_subtype)
+                img.add_header("Content-ID", f"<{cid}>")
+                img.add_header("Content-Disposition", "inline")
+                related.attach(img)
+            content = related.as_bytes()
+        else:
+            content = msg.as_bytes()
 
     if timestamp is None:
         timestamp = datetime.datetime(2026, 4, 13, 10, 0, 0)
