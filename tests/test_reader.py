@@ -75,3 +75,102 @@ def test_extract_body_skips_attachment_disposition():
     parsed = email_mod.message_from_bytes(msg.as_bytes())
     body, cid_map = reader.extract_body_and_cid_map(parsed)
     assert cid_map == {}
+
+
+def _identity_sign(url: str) -> str:
+    """Test sign_url double: prefix with 'SIGN:' so rewriter output is inspectable."""
+    return f"SIGN:{url}"
+
+
+def test_clean_drops_script_tag():
+    out = reader.clean_and_rewrite("<p>ok</p><script>evil()</script>", {}, _identity_sign)
+    # bleach strips the <script> tag but keeps inner text as inert text node
+    assert "<script" not in out.lower()
+    assert "</script>" not in out.lower()
+    assert "<p>ok</p>" in out
+
+
+def test_clean_drops_event_handler():
+    out = reader.clean_and_rewrite('<a href="http://x" onclick="bad()">hi</a>', {}, _identity_sign)
+    assert "onclick" not in out.lower()
+    assert "bad()" not in out
+
+
+def test_clean_drops_javascript_href():
+    out = reader.clean_and_rewrite('<a href="javascript:alert(1)">x</a>', {}, _identity_sign)
+    assert "javascript:" not in out.lower()
+
+
+def test_clean_keeps_formatting_tags():
+    html = "<p><b>bold</b> <em>em</em> <ul><li>one</li><li>two</li></ul></p>"
+    out = reader.clean_and_rewrite(html, {}, _identity_sign)
+    assert "<b>bold</b>" in out
+    assert "<li>one</li>" in out
+
+
+def test_clean_rewrites_http_img():
+    out = reader.clean_and_rewrite('<img src="http://cdn.example.com/x.png">', {}, _identity_sign)
+    assert 'src="SIGN:http://cdn.example.com/x.png"' in out
+
+
+def test_clean_rewrites_https_img():
+    out = reader.clean_and_rewrite('<img src="https://cdn.example.com/x.png">', {}, _identity_sign)
+    assert 'src="SIGN:https://cdn.example.com/x.png"' in out
+
+
+def test_clean_normalizes_protocol_relative_to_https():
+    out = reader.clean_and_rewrite('<img src="//cdn.example.com/x.png">', {}, _identity_sign)
+    assert 'src="SIGN:https://cdn.example.com/x.png"' in out
+
+
+def test_clean_resolves_cid_to_data_uri():
+    cid_map = {"foo": "data:image/png;base64,AAAA"}
+    out = reader.clean_and_rewrite('<img src="cid:foo" alt="x">', cid_map, _identity_sign)
+    assert 'src="data:image/png;base64,AAAA"' in out
+
+
+def test_clean_drops_unknown_cid():
+    out = reader.clean_and_rewrite('<p>before</p><img src="cid:missing"><p>after</p>', {}, _identity_sign)
+    assert "<img" not in out
+    assert "<p>before</p>" in out
+
+
+def test_clean_preserves_data_uri_img():
+    src = "data:image/png;base64,AAAA"
+    out = reader.clean_and_rewrite(f'<img src="{src}">', {}, _identity_sign)
+    assert f'src="{src}"' in out
+
+
+def test_clean_strips_srcset():
+    html = '<img src="http://x/a.jpg" srcset="http://x/a.jpg 1x, http://x/b.jpg 2x">'
+    out = reader.clean_and_rewrite(html, {}, _identity_sign)
+    assert "srcset" not in out
+    assert 'src="SIGN:http://x/a.jpg"' in out
+
+
+def test_clean_drops_relative_img_src():
+    out = reader.clean_and_rewrite('<p>x</p><img src="/foo.png">', {}, _identity_sign)
+    assert "<img" not in out
+
+
+def test_clean_drops_svg_tag():
+    out = reader.clean_and_rewrite('<p>ok</p><svg><circle r="10"/></svg>', {}, _identity_sign)
+    assert "<svg" not in out.lower()
+    assert "<p>ok</p>" in out
+
+
+def test_clean_survives_malformed_html():
+    malformed = '<p>unclosed<img src=http://x.com/y.png><script>evil'
+    out = reader.clean_and_rewrite(malformed, {}, _identity_sign)
+    # bleach strips <script> tags; inner text becomes inert text node
+    assert "<script" not in out.lower()
+    assert "</script>" not in out.lower()
+
+
+def test_render_iframe_document_includes_csp_and_body():
+    doc = reader.render_iframe_document("<p>hi</p>", proxy_origin="http://localhost:8000")
+    assert "<!DOCTYPE html>" in doc
+    assert "default-src 'none'" in doc
+    assert "img-src http://localhost:8000 data:" in doc
+    assert '<base target="_blank">' in doc
+    assert "<p>hi</p>" in doc
