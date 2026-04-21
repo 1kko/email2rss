@@ -159,7 +159,12 @@ def _fetch_one_hop(hop_url: str) -> requests.Response:
         logger.info("fetch_image reject: DNS failure host=%s err=%s", host, e)
         abort(502)
 
-    resolved_ips = {info[4][0] for info in infos}
+    # Split by family and prefer IPv4. Many container runtimes have IPv4-only
+    # egress; picking an IPv6 address there silently fails TCP connect → 502.
+    # Using sorted() also gives deterministic pinning for logs and tests.
+    ipv4s = sorted({info[4][0] for info in infos if info[0] == socket.AF_INET})
+    ipv6s = sorted({info[4][0] for info in infos if info[0] == socket.AF_INET6})
+    resolved_ips = ipv4s + ipv6s
     if not resolved_ips:
         logger.info("fetch_image reject: empty DNS resolution host=%s", host)
         abort(502)
@@ -169,7 +174,7 @@ def _fetch_one_hop(hop_url: str) -> requests.Response:
             logger.info("fetch_image reject: non-public IP host=%s ip=%s", host, ip_str)
             abort(403)
 
-    pinned_ip = next(iter(resolved_ips))
+    pinned_ip = resolved_ips[0]
 
     session = requests.Session()
     adapter = PinnedIPAdapter(pinned_host=host, pinned_ip=pinned_ip)

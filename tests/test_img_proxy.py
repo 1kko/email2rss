@@ -148,6 +148,32 @@ def _fake_response(status, headers, body_chunks):
     return R()
 
 
+def test_fetch_image_prefers_ipv4_when_both_families_resolved(monkeypatch):
+    """Many container runtimes have IPv4-only egress; picking IPv6 from a
+    dual-stack DNS result would silently fail TCP connect → 502. The pinned
+    IP must be the IPv4 address."""
+    def fake_getaddrinfo(host, port, **kw):
+        return [
+            (socket.AF_INET6, socket.SOCK_STREAM, 6, "", ("2001:4860::1", port, 0, 0)),
+            (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("142.251.156.119", port)),
+        ]
+    monkeypatch.setattr(socket, "getaddrinfo", fake_getaddrinfo)
+
+    captured_urls = []
+
+    def fake_send(adapter, req, **kw):
+        captured_urls.append(req.url)
+        return _fake_response(200, {"Content-Type": "image/png"}, [b"\x89PNG"])
+
+    monkeypatch.setattr("requests.adapters.HTTPAdapter.send", fake_send)
+
+    body, ctype = img_proxy.fetch_image("http://dualstack.example.com/x.png", TEST_SECRET)
+    assert ctype == "image/png"
+    # URL was rewritten to the IPv4 address, not the IPv6 one
+    assert "142.251.156.119" in captured_urls[0]
+    assert "2001:4860" not in captured_urls[0]
+
+
 def test_fetch_image_happy_path_png(monkeypatch):
     def fake_getaddrinfo(host, port, **kw):
         return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", port))]
