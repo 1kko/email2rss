@@ -7,7 +7,7 @@ import ipaddress
 import logging
 import socket
 from hashlib import sha256
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse
 
 import requests
 from requests.adapters import HTTPAdapter
@@ -24,6 +24,8 @@ ALLOWED_IMAGE_TYPES = frozenset({
 MAX_IMAGE_BYTES = 5 * 1024 * 1024
 FETCH_TIMEOUT_SECS = 5
 CHUNK_SIZE = 8192
+MAX_REDIRECTS = 3
+REDIRECT_STATUSES = frozenset({301, 302, 303, 307, 308})
 
 
 def _compute_sig(u_param: str, secret: bytes) -> str:
@@ -131,22 +133,22 @@ def _is_public_ip(ip_str: str) -> bool:
     )
 
 
-def fetch_image(url: str, secret: bytes) -> tuple[bytes, str]:
+def _fetch_one_hop(hop_url: str) -> requests.Response:
     """
-    Fetch an image with SSRF defenses. Returns (bytes, content_type) on success,
-    or raises werkzeug HTTPException with the appropriate status code.
+    Apply SSRF validation to `hop_url`, resolve + pin its DNS, and return the
+    streaming response (status not yet inspected).
 
-    `secret` is accepted for API symmetry with sign_url; signature verification
-    happens in the Flask route, not here.
+    Called once per hop in `fetch_image`. Each hop is validated independently so
+    a server-issued redirect cannot escape our SSRF defenses.
     """
-    parsed = urlparse(url)
+    parsed = urlparse(hop_url)
     if parsed.scheme not in ("http", "https"):
-        logger.info("fetch_image reject: bad scheme url=%r", url)
+        logger.info("fetch_image reject: bad scheme url=%r", hop_url)
         abort(400)
 
     host = parsed.hostname
     if not host:
-        logger.info("fetch_image reject: no hostname url=%r", url)
+        logger.info("fetch_image reject: no hostname url=%r", hop_url)
         abort(400)
 
     port = parsed.port or (443 if parsed.scheme == "https" else 80)
@@ -162,7 +164,6 @@ def fetch_image(url: str, secret: bytes) -> tuple[bytes, str]:
         logger.info("fetch_image reject: empty DNS resolution host=%s", host)
         abort(502)
 
-    # Reject if ANY resolved address is non-public
     for ip_str in resolved_ips:
         if not _is_public_ip(ip_str):
             logger.info("fetch_image reject: non-public IP host=%s ip=%s", host, ip_str)
@@ -176,38 +177,71 @@ def fetch_image(url: str, secret: bytes) -> tuple[bytes, str]:
     session.mount("https://", adapter)
 
     try:
-        resp = session.get(
-            url,
+        return session.get(
+            hop_url,
             timeout=FETCH_TIMEOUT_SECS,
             stream=True,
             allow_redirects=False,
             headers={"User-Agent": "email2rss-image-proxy"},
         )
     except requests.RequestException:
-        logger.warning("fetch_image request failed for %s", url)
+        logger.warning("fetch_image request failed for %s", hop_url)
         abort(502)
 
-    try:
-        if resp.status_code != 200:
-            logger.info(
-                "fetch_image reject: upstream status=%s url=%s location=%s",
-                resp.status_code, url, resp.headers.get("Location", ""),
-            )
-            abort(502)
 
-        ctype = (resp.headers.get("Content-Type") or "").split(";")[0].strip().lower()
-        if ctype not in ALLOWED_IMAGE_TYPES:
-            logger.info("fetch_image reject: bad content-type=%r url=%s", ctype, url)
-            abort(415)
+def fetch_image(url: str, secret: bytes) -> tuple[bytes, str]:
+    """
+    Fetch an image with SSRF defenses. Returns (bytes, content_type) on success,
+    or raises werkzeug HTTPException with the appropriate status code.
 
-        body = bytearray()
-        for chunk in resp.iter_content(chunk_size=CHUNK_SIZE):
-            if chunk:
-                body.extend(chunk)
-                if len(body) > MAX_IMAGE_BYTES:
-                    logger.info("fetch_image reject: oversize url=%s", url)
-                    abort(413)
+    Follows up to `MAX_REDIRECTS` hops. Each hop re-runs full SSRF validation
+    (scheme, DNS, public-IP, pinned connect) because a redirect could otherwise
+    point at an internal host.
 
-        return bytes(body), ctype
-    finally:
-        resp.close()
+    `secret` is accepted for API symmetry with sign_url; signature verification
+    happens in the Flask route, not here.
+    """
+    current_url = url
+    for hop in range(MAX_REDIRECTS + 1):
+        resp = _fetch_one_hop(current_url)
+        try:
+            if resp.status_code in REDIRECT_STATUSES:
+                if hop >= MAX_REDIRECTS:
+                    logger.info("fetch_image reject: too many redirects url=%s", url)
+                    abort(502)
+                location = resp.headers.get("Location")
+                if not location:
+                    logger.info(
+                        "fetch_image reject: redirect without Location url=%s status=%s",
+                        current_url, resp.status_code,
+                    )
+                    abort(502)
+                current_url = urljoin(current_url, location)
+                continue
+
+            if resp.status_code != 200:
+                logger.info(
+                    "fetch_image reject: upstream status=%s url=%s",
+                    resp.status_code, current_url,
+                )
+                abort(502)
+
+            ctype = (resp.headers.get("Content-Type") or "").split(";")[0].strip().lower()
+            if ctype not in ALLOWED_IMAGE_TYPES:
+                logger.info("fetch_image reject: bad content-type=%r url=%s", ctype, current_url)
+                abort(415)
+
+            body = bytearray()
+            for chunk in resp.iter_content(chunk_size=CHUNK_SIZE):
+                if chunk:
+                    body.extend(chunk)
+                    if len(body) > MAX_IMAGE_BYTES:
+                        logger.info("fetch_image reject: oversize url=%s", current_url)
+                        abort(413)
+
+            return bytes(body), ctype
+        finally:
+            resp.close()
+
+    # Unreachable: loop either returns or aborts on each iteration.
+    abort(502)
