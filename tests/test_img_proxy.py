@@ -261,3 +261,35 @@ def test_fetch_image_rejects_documentation_range(monkeypatch):
     with pytest.raises(HTTPException) as ei:
         img_proxy.fetch_image("http://docs.example.com/x.png", TEST_SECRET)
     assert ei.value.code == 403
+
+
+def test_pinned_ip_adapter_sets_tls_sni_for_https(monkeypatch):
+    """After URL rewrite to pinned IP, server_hostname and assert_hostname must
+    still be the real hostname — otherwise TLS cert validation fails for HTTPS."""
+    import requests
+    import requests.adapters
+
+    adapter = img_proxy.PinnedIPAdapter(pinned_host="example.com", pinned_ip="93.184.216.34")
+
+    # Minimal fake pool to verify conn_kw is patched
+    class FakePool:
+        def __init__(self):
+            self.conn_kw = {}
+
+    fake_conn = FakePool()
+
+    def fake_super_get(self, request, verify, proxies=None, cert=None):
+        # Simulate what urllib3 would return — the pool keyed by the rewritten URL
+        return fake_conn
+
+    monkeypatch.setattr(
+        requests.adapters.HTTPAdapter,
+        "get_connection_with_tls_context",
+        fake_super_get,
+    )
+
+    # Build a minimal request object
+    req = requests.Request("GET", "https://93.184.216.34:443/x.png").prepare()
+    conn = adapter.get_connection_with_tls_context(req, verify=True)
+    assert conn.conn_kw.get("server_hostname") == "example.com"
+    assert conn.conn_kw.get("assert_hostname") == "example.com"
