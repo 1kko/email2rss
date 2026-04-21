@@ -1,6 +1,7 @@
 """Tests for database.py — upsert, queries, indexes."""
 import datetime
 
+import pytest
 from sqlalchemy import text
 from sqlalchemy import text as db_text
 
@@ -161,3 +162,128 @@ def test_fts_delete_trigger_cleans_up(db_session):
     with db.engine.connect() as conn:
         fts_count = conn.execute(db_text("SELECT COUNT(*) FROM emails_fts")).scalar()
     assert fts_count == 0
+
+
+def test_mark_read_flips_flag(db_session):
+    row = insert_email(db_session, email_id=300)
+    assert row.is_read is False
+
+    db.mark_read(row.id, True)
+
+    refreshed = db_session.query(db.Email).filter_by(id=row.id).one()
+    assert refreshed.is_read is True
+
+
+def test_mark_read_unflip(db_session):
+    row = insert_email(db_session, email_id=301)
+    db.mark_read(row.id, True)
+    db.mark_read(row.id, False)
+    refreshed = db_session.query(db.Email).filter_by(id=row.id).one()
+    assert refreshed.is_read is False
+
+
+def test_mark_starred_flips_flag(db_session):
+    row = insert_email(db_session, email_id=302)
+    db.mark_starred(row.id, True)
+    refreshed = db_session.query(db.Email).filter_by(id=row.id).one()
+    assert refreshed.is_starred is True
+
+
+def test_get_emails_filtered_unread_only(db_session):
+    a = insert_email(db_session, email_id=310, sender="s@example.com")
+    insert_email(db_session, email_id=311, sender="s@example.com")
+    db.mark_read(a.id, True)
+
+    rows = db.get_emails_filtered(sender="s@example.com", filter_mode="unread", limit=50)
+    assert len(rows) == 1
+    assert rows[0]["guid"]
+    assert all(r["subject"] for r in rows)
+
+
+def test_get_emails_filtered_starred_only(db_session):
+    insert_email(db_session, email_id=320, sender="s@example.com")
+    b = insert_email(db_session, email_id=321, sender="s@example.com")
+    db.mark_starred(b.id, True)
+
+    rows = db.get_emails_filtered(sender="s@example.com", filter_mode="starred", limit=50)
+    assert len(rows) == 1
+
+
+def test_get_emails_filtered_all_returns_all(db_session):
+    insert_email(db_session, email_id=330, sender="s@example.com")
+    insert_email(db_session, email_id=331, sender="s@example.com")
+
+    rows = db.get_emails_filtered(sender="s@example.com", filter_mode="all", limit=50)
+    assert len(rows) == 2
+
+
+def test_get_emails_filtered_across_all_senders(db_session):
+    insert_email(db_session, email_id=340, sender="alice@example.com")
+    insert_email(db_session, email_id=341, sender="bob@example.com")
+
+    rows = db.get_emails_filtered(sender=None, filter_mode="all", limit=50)
+    assert len(rows) == 2
+
+
+def test_get_emails_filtered_rejects_invalid_mode(db_session):
+    with pytest.raises(ValueError, match="filter_mode"):
+        db.get_emails_filtered(sender=None, filter_mode="garbage", limit=50)
+
+
+def test_search_emails_finds_match_in_subject(db_session):
+    db.save_email(
+        sender="s@example.com", receiver="me@localhost", email_id=400,
+        subject="Quarterly report released",
+        content=b"From: s@example.com\nSubject: Quarterly report released\n\nthe quarterly report is out",
+        timestamp=datetime.datetime(2026, 4, 13),
+    )
+
+    results = db.search_emails("quarterly", limit=50)
+    assert len(results) == 1
+    assert "Quarterly report" in results[0]["subject"]
+
+
+def test_search_emails_finds_match_in_body(db_session):
+    db.save_email(
+        sender="s@example.com", receiver="me@localhost", email_id=401,
+        subject="Newsletter", content=b"From: s@example.com\nSubject: Newsletter\n\nuncommon-term-xyz in body",
+        timestamp=datetime.datetime(2026, 4, 13),
+    )
+
+    results = db.search_emails("uncommon-term-xyz", limit=50)
+    assert len(results) == 1
+
+
+def test_search_emails_returns_snippet_with_bold_markup(db_session):
+    db.save_email(
+        sender="s@example.com", receiver="me@localhost", email_id=402,
+        subject="Newsletter", content=b"From: s@example.com\nSubject: Newsletter\n\npleasehighlight this word",
+        timestamp=datetime.datetime(2026, 4, 13),
+    )
+    results = db.search_emails("pleasehighlight", limit=50)
+    assert len(results) == 1
+    assert "<b>" in results[0]["snippet"] and "</b>" in results[0]["snippet"]
+
+
+def test_search_emails_invalid_syntax_raises_SearchSyntaxError(db_session):
+    with pytest.raises(db.SearchSyntaxError):
+        db.search_emails("AND AND AND", limit=50)
+
+
+def test_get_email_by_guid_with_state_returns_read_and_starred(db_session):
+    row = insert_email(db_session, email_id=500, sender="sender@example.com")
+    db.mark_read(row.id, True)
+    db.mark_starred(row.id, True)
+
+    import hashlib
+    guid = hashlib.md5(
+        ("Hello from the test suite"
+         + "Mon, 13 Apr 2026 10:00:00 +0000"
+         + "sender@example.com").encode(),
+        usedforsecurity=False,
+    ).hexdigest()
+
+    found = db.get_email_by_guid_with_state("sender@example.com", guid)
+    assert found is not None
+    assert found.is_read is True
+    assert found.is_starred is True

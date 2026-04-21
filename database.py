@@ -5,6 +5,7 @@ Database module for the application.
 import datetime
 import email
 import hashlib
+import sqlite3
 
 from sqlalchemy import create_engine, event, Column, Integer, String, Text, DateTime, BLOB, Index, Boolean, text
 from sqlalchemy.pool import NullPool
@@ -404,6 +405,166 @@ def get_emails_by_sender_with_metadata(sender: str):
                 continue
 
         return result
+
+
+class SearchSyntaxError(Exception):
+    """Raised when FTS5 MATCH expression is malformed."""
+
+
+_VALID_FILTER_MODES = {"all", "unread", "starred"}
+
+
+def mark_read(email_id: int, is_read: bool) -> None:
+    """Set the is_read flag on the Email row with primary-key id=email_id."""
+    with Session() as session:
+        session.query(Email).filter_by(id=email_id).update(
+            {Email.is_read: is_read}, synchronize_session=False
+        )
+        session.commit()
+
+
+def mark_starred(email_id: int, is_starred: bool) -> None:
+    """Set the is_starred flag on the Email row with primary-key id=email_id."""
+    with Session() as session:
+        session.query(Email).filter_by(id=email_id).update(
+            {Email.is_starred: is_starred}, synchronize_session=False
+        )
+        session.commit()
+
+
+def get_email_by_guid_with_state(sender: str, guid: str):
+    """
+    Return the Email row for (sender, guid) including is_read/is_starred, or None.
+    Same GUID calculation as get_email_by_guid.
+    """
+    with Session() as session:
+        emails = session.query(Email).filter_by(sender=sender).all()
+        for email_record in emails:
+            try:
+                msg = email.message_from_bytes(email_record.content)
+                unique_string = (msg["subject"] or "") + (msg["date"] or "") + (msg["from"] or "")
+                calculated_guid = hashlib.md5(unique_string.encode(), usedforsecurity=False).hexdigest()
+                if calculated_guid == guid:
+                    _ = email_record.is_read, email_record.is_starred
+                    session.expunge(email_record)
+                    return email_record
+            except Exception:
+                logging.debug("Skipping unparseable email id=%s", email_record.id)
+                continue
+        return None
+
+
+def get_emails_filtered(sender: str | None, filter_mode: str, limit: int) -> list[dict]:
+    """
+    Return metadata dicts for emails matching the filter.
+
+    filter_mode in {"all", "unread", "starred"}. When sender is None, queries
+    across all senders.
+
+    Returned dict shape:
+        {sender, subject, date, guid, timestamp, is_read, is_starred, feed_name}
+    """
+    if filter_mode not in _VALID_FILTER_MODES:
+        raise ValueError(f"filter_mode must be one of {_VALID_FILTER_MODES}, got {filter_mode!r}")
+
+    with Session() as session:
+        q = session.query(Email)
+        if sender is not None:
+            q = q.filter_by(sender=sender)
+        if filter_mode == "unread":
+            q = q.filter(Email.is_read == False)  # noqa: E712
+        elif filter_mode == "starred":
+            q = q.filter(Email.is_starred == True)  # noqa: E712
+        q = q.order_by(Email.timestamp.desc()).limit(limit)
+
+        result = []
+        for email_record in q.all():
+            try:
+                msg = email.message_from_bytes(email_record.content)
+                subject = str(email.header.make_header(email.header.decode_header(msg["subject"])))
+                unique_string = (msg["subject"] or "") + (msg["date"] or "") + (msg["from"] or "")
+                guid = hashlib.md5(unique_string.encode(), usedforsecurity=False).hexdigest()
+                sanitized = email_record.sender.replace("@", "_").replace(".", "_")
+                result.append({
+                    "sender": email_record.sender,
+                    "subject": subject,
+                    "date": msg["date"],
+                    "guid": guid,
+                    "timestamp": email_record.timestamp,
+                    "is_read": email_record.is_read,
+                    "is_starred": email_record.is_starred,
+                    "feed_name": sanitized,
+                })
+            except Exception:
+                logging.debug("Skipping unparseable email id=%s", email_record.id)
+                continue
+        return result
+
+
+def search_emails(query: str, limit: int = 50) -> list[dict]:
+    """
+    FTS5 search across subject + body_text.
+
+    Returns a list of metadata dicts with a `snippet` field containing FTS5's
+    highlighted excerpt (wrapped in <b>...</b> around matches).
+
+    Raises:
+        SearchSyntaxError: on malformed MATCH expressions.
+    """
+    if not query or not query.strip():
+        return []
+
+    sql = text(
+        "SELECT emails.id, emails.sender, emails.subject, emails.content, emails.timestamp, "
+        "snippet(emails_fts, -1, '<b>', '</b>', '...', 20) AS snip "
+        "FROM emails_fts "
+        "JOIN emails ON emails.id = emails_fts.rowid "
+        "WHERE emails_fts MATCH :q "
+        "ORDER BY emails.timestamp DESC "
+        "LIMIT :lim"
+    )
+    from sqlalchemy.exc import OperationalError as SAOperationalError
+
+    def _run_query(q):
+        with engine.connect() as conn:
+            return conn.execute(sql, {"q": q, "lim": limit}).fetchall()
+
+    try:
+        rows = _run_query(query)
+    except (sqlite3.OperationalError, SAOperationalError) as exc:
+        # FTS5 "syntax error" means the query itself is malformed (e.g. AND AND AND).
+        # Other OperationalErrors (e.g. "no such column") can arise from FTS5
+        # mis-tokenising a user query that contains hyphens or other punctuation;
+        # retry as a phrase query so that "foo-bar" finds the literal token sequence.
+        raw_msg = str(exc).lower()
+        if "syntax error" in raw_msg:
+            raise SearchSyntaxError(str(exc)) from exc
+        try:
+            rows = _run_query(f'"{query}"')
+        except (sqlite3.OperationalError, SAOperationalError) as exc2:
+            raise SearchSyntaxError(str(exc2)) from exc2
+
+    result = []
+    for row_id, sender, subject_raw, content, timestamp, snip in rows:
+        try:
+            msg = email.message_from_bytes(content)
+            subject = str(email.header.make_header(email.header.decode_header(msg["subject"])))
+            unique_string = (msg["subject"] or "") + (msg["date"] or "") + (msg["from"] or "")
+            guid = hashlib.md5(unique_string.encode(), usedforsecurity=False).hexdigest()
+            sanitized = sender.replace("@", "_").replace(".", "_")
+            result.append({
+                "sender": sender,
+                "subject": subject,
+                "date": msg["date"],
+                "guid": guid,
+                "timestamp": timestamp,
+                "snippet": snip,
+                "feed_name": sanitized,
+            })
+        except Exception:
+            logging.debug("Skipping unparseable search result id=%s", row_id)
+            continue
+    return result
 
 
 def delete_emails_older_than(cutoff: datetime.datetime) -> int:
