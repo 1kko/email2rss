@@ -1,35 +1,23 @@
 {% extends "base.html" %}
-{% block title %}Search{% endblock %}
+{% block title %}Search: {{ query }}{% endblock %}
 {% block body %}
-<article>
-  <header>
-    <h1>Search</h1>
-  </header>
-  <form method="get" action="/search">
-    <input type="text" name="q" value="{{ query|e }}" placeholder="Enter a query">
-    <button type="submit">Search</button>
-  </form>
-  {% if error %}
-    <p class="error">Search error: {{ error|e }}</p>
-  {% elif not query %}
-    <p>Enter a query in the search box above to find articles.</p>
-  {% elif results %}
-    <ul class="article-items">
-      {% for article in results %}
-        <li class="article-item">
-          <a href="/article/{{ article.feed_name }}/{{ article.guid }}" class="article-title">{{ article.subject }}</a>
-          <div class="meta">
-            From: <a href="/article/{{ article.feed_name }}">{{ article.sender }}</a> |
-            Date: {{ article.date or '' }}
-          </div>
-          {% if article.snippet %}
-            <div class="snippet">{{ article.snippet }}</div>
-          {% endif %}
-        </li>
-      {% endfor %}
-    </ul>
-  {% else %}
-    <p>No results found for <strong>{{ query|e }}</strong>.</p>
-  {% endif %}
-</article>
+<h1>Search results</h1>
+{% if error %}
+  <p class="error">Search error: {{ error }}</p>
+{% elif not query %}
+  <p>Enter a query in the search box above to search across emails.</p>
+{% elif not results %}
+  <p>No results for "{{ query }}".</p>
+{% else %}
+  <p>{{ results|length }} result{% if results|length != 1 %}s{% endif %} for "{{ query }}":</p>
+  <ul class="search-results">
+    {% for r in results %}
+      <li>
+        <a href="/article/{{ r.feed_name }}/{{ r.guid }}">{{ r.subject }}</a>
+        <span class="meta">{{ r.sender }} · {{ r.date }}</span>
+        <p class="snippet">{{ r.snippet|safe }}</p>
+      </li>
+    {% endfor %}
+  </ul>
+{% endif %}
 {% endblock %}

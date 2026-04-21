@@ -328,7 +328,7 @@ def test_article_list_filter_starred(client, db_session):
     assert resp.status_code == 200
     body = resp.data.decode("utf-8")
     # Only one row should appear (the starred one)
-    assert body.count("<li") == 1
+    assert body.count("<li ") == 1   # <li class="..." ...>
 
 
 def test_article_list_default_filter_is_all(client, db_session):
@@ -339,7 +339,7 @@ def test_article_list_default_filter_is_all(client, db_session):
     resp = client.get("/article")  # no filter param
     body = resp.data.decode("utf-8")
     # Both rows present
-    assert body.count("<li") == 2
+    assert body.count("<li ") == 2
 
 
 def test_search_route_returns_results(client, db_session):

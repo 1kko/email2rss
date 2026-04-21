@@ -1,10 +1,21 @@
 {% extends "base.html" %}
 {% block title %}{{ subject }}{% endblock %}
 {% block body %}
-<article class="article">
+<article class="article"
+         data-feed="{{ feed_name }}"
+         data-guid="{{ guid }}"
+         data-read-after-seconds="{{ read_after_seconds }}"
+         data-is-read="{{ 'true' if is_read else 'false' }}"
+         data-is-starred="{{ 'true' if is_starred else 'false' }}">
   <header>
     <h1>{{ subject }}</h1>
     <p class="meta">From: {{ sender }} | Date: {{ date }}</p>
+    <div class="article-actions">
+      <button id="star-btn" aria-label="Toggle star" type="button">
+        <span class="star-icon">{{ '★' if is_starred else '☆' }}</span>
+      </button>
+      <button id="unread-btn" aria-label="Mark as unread" type="button">Mark unread</button>
+    </div>
   </header>
   <iframe
     id="email-body"
@@ -16,4 +27,5 @@
     title="Email body"
   ></iframe>
 </article>
+<script src="{{ url_for('static', filename='reader.js') }}"></script>
 {% endblock %}
