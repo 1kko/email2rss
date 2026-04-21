@@ -41,28 +41,35 @@ _emails_received = _meter.create_counter(
 
 def connect_to_gmail(imap_server, username, password, mailbox="INBOX"):
     """
-    Connects to Gmail using the provided username and password.
+    Connects to the IMAP server with exponential backoff on transient failures.
 
-    Args:
-        username (str): The Gmail username.
-        password (str): The Gmail password.
+    Retries up to 4 times total with delays [0, 1, 2, 4] seconds between attempts.
+    Retries on `imaplib.IMAP4.error` (which covers `imaplib.IMAP4.abort`) and
+    `OSError` (network issues). Other exceptions propagate unchanged.
 
     Returns:
-        imaplib.IMAP4_SSL: The connected IMAP4_SSL object.
+        imaplib.IMAP4_SSL: The connected and mailbox-selected IMAP object.
 
     Raises:
-        Exception: If there is an error connecting to Gmail.
-
+        imaplib.IMAP4.error | OSError: If all retries fail.
     """
-    try:
-        mail = imaplib.IMAP4_SSL(imap_server)
-        mail.login(username, password)
-        mail.select(mailbox)
-        logging.info(f"Connected to Email and selected {mailbox}.")
-        return mail
-    except Exception as e:
-        logging.error(f"Failed to connect to Gmail: {e}")
-        raise
+    delays = [0, 1, 2, 4]
+    last_err: Exception | None = None
+    for attempt, delay in enumerate(delays):
+        if delay:
+            time.sleep(delay)
+        try:
+            mail = imaplib.IMAP4_SSL(imap_server)
+            mail.login(username, password)
+            mail.select(mailbox)
+            logging.info(f"Connected to IMAP and selected {mailbox} (attempt {attempt + 1}).")
+            return mail
+        except (imaplib.IMAP4.error, OSError) as e:
+            last_err = e
+            logging.warning(f"IMAP connect attempt {attempt + 1} failed: {e}")
+    logging.error(f"IMAP connect failed after {len(delays)} attempts: {last_err}")
+    assert last_err is not None  # noqa: S101 — loop always runs ≥1 iteration
+    raise last_err
 
 
 def fetch_emails(mail, since=10):
@@ -92,29 +99,38 @@ def fetch_emails(mail, since=10):
         emails = {}
         for index, num in enumerate(messages):
             logging.info(f"Processing email {index + 1} of {len(messages)}.")
-            _, data = mail.fetch(num, "(RFC822)")
-            msg = email.message_from_bytes(data[0][1])
-            sender = extract_email_address(msg["from"], default="unknown@email.com")
-            receiver = extract_email_address(msg["to"], default="you@email.com")
-            logging.info(
-                f"Email from {sender}. title: {msg['subject']} by {msg['date']}"
-            )
-            article_date = email.utils.parsedate_to_datetime(msg["date"])
+            try:
+                _, data = mail.fetch(num, "(RFC822)")
+                msg = email.message_from_bytes(data[0][1])
+                sender = extract_email_address(msg["from"], default="unknown@email.com")
+                receiver = extract_email_address(msg["to"], default="you@email.com")
+                logging.info(
+                    f"Email from {sender}. title: {msg['subject']} by {msg['date']}"
+                )
+                article_date = email.utils.parsedate_to_datetime(msg["date"])
 
-            # save to database
-            db.save_email(
-                sender=sender,
-                receiver=receiver,
-                subject=msg["subject"],
-                email_id=int(num),
-                content=data[0][1],
-                timestamp=article_date,
-            )
-            _emails_received.add(1, {"sender": sender})
+                db.save_email(
+                    sender=sender,
+                    receiver=receiver,
+                    subject=msg["subject"],
+                    email_id=int(num),
+                    content=data[0][1],
+                    timestamp=article_date,
+                )
+                _emails_received.add(1, {"sender": sender})
 
-            if sender not in emails:
-                emails[sender] = []
-            emails[sender].append(msg)
+                if sender not in emails:
+                    emails[sender] = []
+                emails[sender].append(msg)
+            except (imaplib.IMAP4.error, OSError) as e:
+                # IMAP-level problem — the connection is in an unknown state.
+                # Abort the cycle; the next cycle will reconnect from scratch.
+                logging.error(f"IMAP error while fetching message {num}: {e}")
+                raise
+            except Exception:
+                # Per-email parse/DB error — log with traceback, skip, continue.
+                logging.exception(f"Skipping malformed email num={num}")
+                continue
         logging.info("Fetched emails and grouped by sender.")
         return emails
     except Exception as e:
@@ -139,6 +155,15 @@ def main():
     userid = config.get("userid")
     userpw = config.get("userpw")
     mailbox = config.get("mailbox")
+
+    # Retention purge — runs before the fetch so we don't delete just-fetched rows
+    retention_days = config.get("retention_days")
+    if retention_days:
+        now_naive = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
+        cutoff = now_naive - datetime.timedelta(days=retention_days)
+        deleted = db.delete_emails_older_than(cutoff)
+        if deleted:
+            logging.info(f"Retention: purged {deleted} emails older than {retention_days} days.")
 
     # if emails.db does not exist since should be 30, otherwise 1
     # 30 to populate the rss feed for the first time
