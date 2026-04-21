@@ -130,6 +130,11 @@ def insert_email(
                     related[h] = msg[h]
             # Preserve the original alternative body as the first related part
             alt_payload = msg.get_payload()
+            if not isinstance(alt_payload, list):
+                raise TypeError(
+                    f"insert_email(inline_images=...) expected multipart base message; "
+                    f"got {type(alt_payload).__name__}"
+                )
             alternative = MIMEMultipart("alternative")
             for part in alt_payload:
                 alternative.attach(part)

@@ -2,7 +2,10 @@
 from __future__ import annotations
 
 import base64
+import logging
 from email.message import Message
+
+logger = logging.getLogger(__name__)
 
 
 def extract_body_and_cid_map(msg: Message) -> tuple[str, dict[str, str]]:
@@ -22,8 +25,9 @@ def extract_body_and_cid_map(msg: Message) -> tuple[str, dict[str, str]]:
         for part in msg.walk():
             if part.is_multipart():
                 continue
-            disposition = str(part.get("Content-Disposition") or "").lower()
-            if "attachment" in disposition:
+            disposition_raw = part.get("Content-Disposition") or ""
+            disposition_type = str(disposition_raw).strip().split(";", 1)[0].strip().lower()
+            if disposition_type == "attachment":
                 continue
             charset = part.get_content_charset() or "utf-8"
             payload = part.get_payload(decode=True)
@@ -35,18 +39,21 @@ def extract_body_and_cid_map(msg: Message) -> tuple[str, dict[str, str]]:
                 try:
                     html_content = payload.decode(charset, errors="ignore")
                 except Exception:  # noqa: S112
+                    logger.warning("failed to decode %s part with charset=%r", ctype, charset)
                     continue
             elif ctype == "text/plain" and plain_content is None:
                 try:
                     plain_content = payload.decode(charset, errors="ignore")
                 except Exception:  # noqa: S112
+                    logger.warning("failed to decode %s part with charset=%r", ctype, charset)
                     continue
             elif ctype.startswith("image/"):
                 cid = part.get("Content-ID")
                 if cid:
-                    cid_stripped = cid.strip().lstrip("<").rstrip(">")
-                    b64 = base64.b64encode(payload).decode("ascii")
-                    cid_map[cid_stripped] = f"data:{ctype};base64,{b64}"
+                    cid_stripped = cid.strip().lstrip("<").rstrip(">").strip()
+                    if cid_stripped:
+                        b64 = base64.b64encode(payload).decode("ascii")
+                        cid_map[cid_stripped] = f"data:{ctype};base64,{b64}"
     else:
         charset = msg.get_content_charset() or "utf-8"
         payload = msg.get_payload(decode=True)
