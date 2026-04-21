@@ -89,6 +89,16 @@ After enabling, regenerate your RSS feeds for the changes to take effect.
 - **Full HTML content** - Displays emails exactly as received
 - **Lightweight** - ~2KB CSS, minimal JavaScript
 
+### Security Model
+
+When the internal reader is enabled, rendered emails pass through a hardened pipeline:
+
+- **HTML sanitization** — `bleach` strips scripts, event handlers, dangerous tags, and `javascript:` URIs.
+- **Sandboxed iframe** — email body renders inside `<iframe sandbox="allow-popups allow-popups-to-escape-sandbox">` with no `allow-scripts`. Defense in depth: even if sanitization misses a vector, no JS can execute.
+- **Inline CSP** — the iframe srcdoc declares `default-src 'none'; img-src {server_baseurl} data:` — images load only via the signed proxy or inline data: URIs.
+- **Signed image proxy** — external `<img>` srcs are rewritten to `/img?u=<base64>&sig=<hmac>`. The proxy validates the signature, resolves DNS with `AF_UNSPEC`, rejects private/loopback/link-local/CGNAT IPs (all returned addresses), connects to the pre-resolved IP with correct Host header (defeats DNS rebinding), rejects non-image Content-Types (PNG/JPEG/GIF/WebP only), and caps body size at 5 MB with streaming reads.
+- **Required config** — `server_baseurl` is required when `enable_internal_reader=true`. The HMAC secret is auto-generated on first start and persisted to `{data_dir}/img_proxy_secret` (mode 0600); override via env var `img_proxy_secret`.
+
 ### URL Structure
 
 Articles are accessed via: `http://your-server:8000/article/{feed}/{guid}`
