@@ -99,29 +99,38 @@ def fetch_emails(mail, since=10):
         emails = {}
         for index, num in enumerate(messages):
             logging.info(f"Processing email {index + 1} of {len(messages)}.")
-            _, data = mail.fetch(num, "(RFC822)")
-            msg = email.message_from_bytes(data[0][1])
-            sender = extract_email_address(msg["from"], default="unknown@email.com")
-            receiver = extract_email_address(msg["to"], default="you@email.com")
-            logging.info(
-                f"Email from {sender}. title: {msg['subject']} by {msg['date']}"
-            )
-            article_date = email.utils.parsedate_to_datetime(msg["date"])
+            try:
+                _, data = mail.fetch(num, "(RFC822)")
+                msg = email.message_from_bytes(data[0][1])
+                sender = extract_email_address(msg["from"], default="unknown@email.com")
+                receiver = extract_email_address(msg["to"], default="you@email.com")
+                logging.info(
+                    f"Email from {sender}. title: {msg['subject']} by {msg['date']}"
+                )
+                article_date = email.utils.parsedate_to_datetime(msg["date"])
 
-            # save to database
-            db.save_email(
-                sender=sender,
-                receiver=receiver,
-                subject=msg["subject"],
-                email_id=int(num),
-                content=data[0][1],
-                timestamp=article_date,
-            )
-            _emails_received.add(1, {"sender": sender})
+                db.save_email(
+                    sender=sender,
+                    receiver=receiver,
+                    subject=msg["subject"],
+                    email_id=int(num),
+                    content=data[0][1],
+                    timestamp=article_date,
+                )
+                _emails_received.add(1, {"sender": sender})
 
-            if sender not in emails:
-                emails[sender] = []
-            emails[sender].append(msg)
+                if sender not in emails:
+                    emails[sender] = []
+                emails[sender].append(msg)
+            except (imaplib.IMAP4.error, OSError) as e:
+                # IMAP-level problem — the connection is in an unknown state.
+                # Abort the cycle; the next cycle will reconnect from scratch.
+                logging.error(f"IMAP error while fetching message {num}: {e}")
+                raise
+            except Exception:
+                # Per-email parse/DB error — log with traceback, skip, continue.
+                logging.exception(f"Skipping malformed email num={num}")
+                continue
         logging.info("Fetched emails and grouped by sender.")
         return emails
     except Exception as e:
