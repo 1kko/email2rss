@@ -54,6 +54,7 @@ enable_internal_reader=false
 | `server_baseurl` | Base URL for RSS feed links | Optional |
 | `bind_address` | Address the HTTP server binds to | `127.0.0.1` |
 | `enable_internal_reader` | Enable internal article viewer | `false` |
+| `read_after_seconds` | Dwell time (seconds) before an article auto-marks as read | `5` |
 
 ## Internal RSS Reader
 
@@ -71,6 +72,13 @@ The internal RSS reader is an optional feature that allows you to read email con
 - Clicking an item displays the full email HTML content in a clean, readable format
 - No external requests needed - all content served from your database
 - Ideal for email-only content or when you want to read everything in one place
+
+### Reader UI Features
+
+- **Read/unread state** — each article auto-marks read after `read_after_seconds` (default 5s) of dwell. Click "Mark unread" in the article toolbar to undo.
+- **Starred articles** — click the star icon in the article header to pin an article. Starred articles appear under the "Starred" filter.
+- **Filter chips** — article lists have "All / Unread / Starred" chips at the top (URL: `/article?filter=unread`).
+- **Full-text search** — the search box in the header queries all stored emails by subject + body via SQLite FTS5. Results highlight the matched term. Supports FTS5's native syntax (phrases in quotes, `AND`/`OR`, prefix `word*`).
 
 ### Reliability
 
