@@ -8,6 +8,12 @@
   {% block head %}{% endblock %}
 </head>
 <body>
+  <nav class="site-nav">
+    <a href="/article" class="nav-home">All Articles</a>
+    <form class="nav-search" action="/search" method="get">
+      <input type="search" name="q" placeholder="Search..." value="{{ search_q or '' }}" required>
+    </form>
+  </nav>
   {% block body %}{% endblock %}
 </body>
 </html>

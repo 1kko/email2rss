@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}Search: {{ query }}{% endblock %}
+{% block body %}
+<h1>Search results</h1>
+{% if error %}
+  <p class="error">Search error: {{ error }}</p>
+{% elif not query %}
+  <p>Enter a query in the search box above to search across emails.</p>
+{% elif not results %}
+  <p>No results for "{{ query }}".</p>
+{% else %}
+  <p>{{ results|length }} result{% if results|length != 1 %}s{% endif %} for "{{ query }}":</p>
+  <ul class="search-results">
+    {% for r in results %}
+      <li>
+        <a href="/article/{{ r.feed_name }}/{{ r.guid }}">{{ r.subject }}</a>
+        <span class="meta">{{ r.sender }} · {{ r.date }}</span>
+        <p class="snippet">{{ r.snippet|safe }}</p>
+      </li>
+    {% endfor %}
+  </ul>
+{% endif %}
+{% endblock %}

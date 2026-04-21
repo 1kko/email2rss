@@ -247,3 +247,18 @@ def render_iframe_document(cleaned_html: str, proxy_origin: str) -> str:
     """Wrap cleaned body HTML in a minimal document with inner CSP for the srcdoc iframe."""
     csp = _IFRAME_CSP.format(proxy_origin=proxy_origin)
     return _IFRAME_TEMPLATE.format(csp=csp, body=cleaned_html)
+
+
+def extract_plain_text(msg) -> str:
+    """
+    Return HTML-stripped plain text for FTS indexing.
+
+    Prefers text/plain parts; falls back to HTML->plain via bleach.
+    Returns empty string if neither part is present.
+    """
+    body_html, _cid_map = extract_body_and_cid_map(msg)
+    if not body_html:
+        return ""
+    # If body_html is actually plain text wrapped in <pre>, strip the <pre> wrapper
+    # by running bleach with no allowed tags — bleach strips all markup.
+    return bleach.clean(body_html, tags=[], strip=True)
