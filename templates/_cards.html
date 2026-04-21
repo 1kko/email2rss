@@ -1,0 +1,71 @@
+{# Shared card / scroller macros for the landing page. #}
+
+{% macro row_favicon(row) %}
+  {% if row.favicon_url %}
+    <img class="feed-row__title-favicon" src="{{ row.favicon_url }}" alt="" loading="lazy" referrerpolicy="no-referrer">
+  {% else %}
+    <span class="feed-row__title-monogram"
+          style="background: hsl({{ row.monogram_hue }}, 55%, 50%)">
+      {{ row.monogram_letter }}
+    </span>
+  {% endif %}
+{% endmacro %}
+
+{% macro _thumb(article) %}
+  {% if article.image_url %}
+    <img src="{{ article.image_url }}" alt="" loading="lazy" referrerpolicy="no-referrer">
+  {% elif article.sender_favicon_url %}
+    <img class="article-card__favicon" src="{{ article.sender_favicon_url }}" alt="" loading="lazy" referrerpolicy="no-referrer">
+  {% else %}
+    <span class="article-card__monogram"
+          style="background: hsl({{ article.monogram_hue }}, 55%, 50%)">
+      {{ article.monogram_letter }}
+    </span>
+  {% endif %}
+{% endmacro %}
+
+{% macro portrait_card(article) %}
+  <a class="article-card article-card--portrait" href="/article/{{ article.feed_name }}/{{ article.guid }}">
+    <div class="article-card__thumb">{{ _thumb(article) }}</div>
+    <div class="article-card__body">
+      <p class="article-card__sender-label">
+        {% if article.sender_favicon_url %}
+          <img src="{{ article.sender_favicon_url }}" alt="" loading="lazy" referrerpolicy="no-referrer">
+        {% else %}
+          <span style="display:inline-flex;width:14px;height:14px;border-radius:3px;background:hsl({{ article.monogram_hue }},55%,50%);color:#fff;align-items:center;justify-content:center;font-size:0.55rem;font-weight:700">{{ article.monogram_letter }}</span>
+        {% endif %}
+        {{ article.sender.split("@")[1] if "@" in article.sender else article.sender }}
+      </p>
+      <h3 class="article-card__subject">{{ article.subject }}</h3>
+      <p class="article-card__date">{{ article.relative_date }}</p>
+      {% if not article.is_read %}<span class="article-card__unread-dot" aria-label="unread"></span>{% endif %}
+    </div>
+  </a>
+{% endmacro %}
+
+{% macro landscape_card(article) %}
+  <a class="article-card" href="/article/{{ article.feed_name }}/{{ article.guid }}">
+    <div class="article-card__thumb">{{ _thumb(article) }}</div>
+    <div class="article-card__body">
+      <h3 class="article-card__subject">{{ article.subject }}</h3>
+      <p class="article-card__date">{{ article.relative_date }}</p>
+      {% if not article.is_read %}<span class="article-card__unread-dot" aria-label="unread"></span>{% endif %}
+    </div>
+  </a>
+{% endmacro %}
+
+{% macro scroller(articles, portrait=False) %}
+  <div class="feed-row__scroller">
+    <button class="feed-row__arrow feed-row__arrow--prev" type="button" aria-label="Previous">‹</button>
+    <button class="feed-row__arrow feed-row__arrow--next" type="button" aria-label="Next">›</button>
+    <div class="feed-row__track">
+      {% for article in articles %}
+        {% if portrait %}
+          {{ portrait_card(article) }}
+        {% else %}
+          {{ landscape_card(article) }}
+        {% endif %}
+      {% endfor %}
+    </div>
+  </div>
+{% endmacro %}
