@@ -287,3 +287,74 @@ def test_get_email_by_guid_with_state_returns_read_and_starred(db_session):
     assert found is not None
     assert found.is_read is True
     assert found.is_starred is True
+
+
+def test_mark_starred_unflip(db_session):
+    row = insert_email(db_session, email_id=600)
+    db.mark_starred(row.id, True)
+    db.mark_starred(row.id, False)
+    refreshed = db_session.query(db.Email).filter_by(id=row.id).one()
+    assert refreshed.is_starred is False
+
+
+def test_backfill_fts_populates_existing_rows(db_session):
+    """Simulate pre-FTS-migration DB: insert rows via raw SQL bypassing save_email,
+    drop the FTS rows that insert_email's save_email path added, then run
+    _backfill_fts_index and confirm search finds the rows."""
+    from sqlalchemy import text as _text
+    import database as dbmod
+
+    # Drop and recreate the FTS table so we start empty
+    with dbmod.engine.connect() as conn:
+        conn.execute(_text("DROP TABLE emails_fts"))
+        conn.commit()
+        dbmod._setup_fts(conn)
+        conn.commit()
+
+    # Insert an email via save_email (populates both tables)
+    dbmod.save_email(
+        sender="s@example.com", receiver="me@localhost", email_id=700,
+        subject="BackfillTestSubject",
+        content=b"From: s@example.com\nSubject: BackfillTestSubject\n\ndistinctive-backfill-word",
+        timestamp=datetime.datetime(2026, 4, 13),
+    )
+
+    # Manually clear FTS (simulating a pre-migration DB)
+    with dbmod.engine.connect() as conn:
+        conn.execute(_text("DELETE FROM emails_fts"))
+        conn.commit()
+
+    # Confirm search returns nothing now
+    assert db.search_emails("distinctive-backfill-word") == []
+
+    # Run backfill
+    with dbmod.engine.connect() as conn:
+        dbmod._backfill_fts_index(conn)
+
+    # Now search should find the row
+    results = db.search_emails("distinctive-backfill-word")
+    assert len(results) == 1
+    assert "BackfillTest" in results[0]["subject"]
+
+
+def test_fts_subject_is_html_escaped(db_session):
+    """Malicious subject content must be HTML-escaped in the FTS table so that
+    snippet() output is safe to render with |safe filter."""
+    from sqlalchemy import text as _text
+
+    db.save_email(
+        sender="s@example.com", receiver="me@localhost", email_id=800,
+        subject="<img src=x onerror=alert(1)> XssProbeToken",
+        content=b"From: s@example.com\nSubject: <img src=x onerror=alert(1)> XssProbeToken\n\nbody",
+        timestamp=datetime.datetime(2026, 4, 13),
+    )
+    with db.engine.connect() as conn:
+        stored_subject = conn.execute(
+            _text("SELECT subject FROM emails_fts WHERE rowid = (SELECT id FROM emails WHERE email_id = 800)")
+        ).scalar()
+    # HTML should be escaped in the stored FTS subject
+    assert "<img" not in stored_subject
+    assert "&lt;img" in stored_subject
+    # Search still finds it via the distinctive token
+    results = db.search_emails("XssProbeToken")
+    assert len(results) == 1
