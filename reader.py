@@ -242,7 +242,17 @@ body {{ font: 16px/1.5 -apple-system, system-ui, sans-serif; color: #222; margin
 img {{ max-width: 100%; height: auto; animation: fade-in 0.3s ease-out; }}
 @keyframes fade-in {{ from {{ opacity: 0; }} to {{ opacity: 1; }} }}
 a {{ color: #0066cc; }}
-@media (prefers-color-scheme: dark) {{ body {{ background: #1a1a1a; color: #eee; }} }}
+@media (prefers-color-scheme: dark) {{
+  /* Inline styles inside newsletter HTML (bgcolor="#fff", color:#000, etc.)
+     win over our CSS via specificity, so the @media rule on body was only
+     re-skinning the margin strip. Apply an invert+hue-rotate filter to the
+     whole document so every painted color flips to its dark-mode equivalent.
+     Images/SVG/video get an inverse filter that cancels the outer one so
+     they render with their original colors — photos, logos, charts stay
+     correct. */
+  html {{ background: #1a1a1a; filter: invert(1) hue-rotate(180deg); }}
+  img, svg, picture, video, canvas {{ filter: invert(1) hue-rotate(180deg); }}
+}}
 </style>
 </head>
 <body>{body}</body>
