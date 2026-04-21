@@ -111,6 +111,19 @@ def migrate_database():
         # FTS5 virtual table + delete trigger
         _setup_fts(conn)
 
+        # Schema-version-gated one-shot migrations. PRAGMA user_version is 0 on
+        # fresh DBs and on DBs created before this mechanism existed; each
+        # numbered block bumps it after running so re-runs are no-ops.
+        user_version = conn.execute(text("PRAGMA user_version")).scalar() or 0
+        if user_version < 1:
+            # v1: Invalidate cached preview_image_url values. Rows populated
+            # before the logo-filter + largest-image extractor landed point at
+            # newsletter logos; setting to NULL causes _backfill_preview_images
+            # below to re-extract with the current logic.
+            logging.info("Schema v1: invalidating cached preview_image_url values")
+            conn.execute(text("UPDATE emails SET preview_image_url = NULL"))
+            conn.execute(text("PRAGMA user_version = 1"))
+
         conn.commit()
 
         # Backfill FTS if table is empty but main table has rows (one-time on upgrade)

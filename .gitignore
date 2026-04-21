@@ -133,3 +133,7 @@ data/
 
 # database
 *.db
+
+# Local agent/tool state
+.claude/
+.openchrome/
