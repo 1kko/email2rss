@@ -271,21 +271,32 @@ def extract_plain_text(msg) -> str:
 
 
 _TRACKING_FILENAME_HINTS = ("pixel", "track", "open", "beacon", "spacer")
+_BRAND_FILENAME_HINTS = ("logo", "brand", "header-image", "footer-image", "masthead", "sig-")
 _MIN_IMAGE_PX = 50
 
 
 def extract_preview_image(msg) -> str | None:
     """
-    Walk the MIME message's HTML body and return the first "usable" <img> URL,
-    or None. Used for landing-page thumbnails.
+    Walk the MIME message's HTML body and return the best "usable" <img> URL
+    for a landing-page thumbnail, or None.
 
-    Rules for "usable":
+    Selection strategy:
+    1. Collect all <img> candidates that pass the filter rules below.
+    2. If at least one candidate has both width and height declared, return the
+       candidate with the largest area (width × height). This beats the earlier
+       "first-usable" approach that tended to pick the newsletter logo, since
+       logos are usually near the top and smaller than the article's hero image.
+    3. If no candidate has declared dimensions, return the first one (best we
+       can do without rendering the email to measure images).
+
+    Filter rules (each applies before a candidate is considered):
     - src starts with http://, https://, or // (protocol-relative → https:)
-    - cid: and data: skipped (can't be re-served via the /img proxy from a list)
+    - cid: and data: URIs skipped
     - width=1 or height=1 skipped (tracking pixel)
-    - filename containing pixel/track/open/beacon/spacer skipped (case-insensitive)
-    - if width and height attributes are both declared, both must be >= 50
-    - otherwise accepted
+    - filename contains pixel/track/open/beacon/spacer → skipped (trackers)
+    - filename contains logo/brand/header-image/footer-image/masthead/sig-
+      → skipped (branding imagery)
+    - if both width and height are declared, both must be >= 50
     """
     import re
 
@@ -293,8 +304,9 @@ def extract_preview_image(msg) -> str | None:
     if not body_html:
         return None
 
-    # Find all <img ...> tags. We keep the regex narrow: we only inspect src/width/height.
-    # A full HTML parse is overkill for this single-field extraction.
+    candidates: list[tuple[int, str]] = []  # (area, src); area=-1 when unknown
+    first_unknown_area: str | None = None
+
     for match in re.finditer(r'<img\b([^>]*)>', body_html, flags=re.IGNORECASE):
         attrs_str = match.group(1)
         src = _attr(attrs_str, "src")
@@ -303,11 +315,9 @@ def extract_preview_image(msg) -> str | None:
         src = src.strip()
         lower_src = src.lower()
 
-        # Skip unsupported schemes
         if lower_src.startswith("cid:") or lower_src.startswith("data:"):
             continue
 
-        # Normalize protocol-relative
         if src.startswith("//"):
             src = "https:" + src
             lower_src = src.lower()
@@ -315,26 +325,35 @@ def extract_preview_image(msg) -> str | None:
         if not (lower_src.startswith("http://") or lower_src.startswith("https://")):
             continue
 
-        # Filename hint filter
+        # Filename hint filters — trackers AND branding imagery
         fname = lower_src.rsplit("/", 1)[-1]
         if any(hint in fname for hint in _TRACKING_FILENAME_HINTS):
+            continue
+        if any(hint in fname for hint in _BRAND_FILENAME_HINTS):
             continue
 
         width = _attr_int(attrs_str, "width")
         height = _attr_int(attrs_str, "height")
 
-        # 1x1 tracking pixel
         if width == 1 or height == 1:
             continue
 
-        # If both declared and either is below threshold, skip
         if width is not None and height is not None:
             if width < _MIN_IMAGE_PX or height < _MIN_IMAGE_PX:
                 continue
+            candidates.append((width * height, src))
+        else:
+            # No declared dimensions — remember the first so we can fall back
+            if first_unknown_area is None:
+                first_unknown_area = src
 
-        return src
+    # Prefer the largest declared candidate
+    if candidates:
+        candidates.sort(key=lambda c: c[0], reverse=True)
+        return candidates[0][1]
 
-    return None
+    # Fallback: first image with unknown dimensions
+    return first_unknown_area
 
 
 def _attr(attrs_str: str, name: str) -> str | None:
