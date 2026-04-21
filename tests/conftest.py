@@ -74,6 +74,11 @@ def db_session(monkeypatch):
     monkeypatch.setattr(database, "engine", engine)
     monkeypatch.setattr(database, "Session", SessionLocal)
 
+    # Set up FTS virtual table + delete trigger in the test engine
+    with engine.connect() as conn:
+        database._setup_fts(conn)
+        conn.commit()
+
     session = SessionLocal()
     try:
         yield session
