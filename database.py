@@ -632,3 +632,118 @@ def delete_emails_older_than(cutoff: datetime.datetime) -> int:
         )
         session.commit()
     return deleted
+
+
+def _sender_domain(sender: str) -> str:
+    """Extract domain from a sender email address; '' if no @."""
+    if "@" in sender:
+        return sender.split("@", 1)[1].lower()
+    return ""
+
+
+def _sanitize_feed_name(sender: str) -> str:
+    """Match feed_generator.py's convention: replace @ and . with _."""
+    return sender.replace("@", "_").replace(".", "_")
+
+
+def _article_dict(row: Email, sign_url) -> dict:
+    """Shape a single article for landing-page rendering."""
+    import util
+
+    try:
+        msg = email.message_from_bytes(row.content)
+        subject = str(email.header.make_header(email.header.decode_header(msg["subject"])))
+        unique_string = (msg["subject"] or "") + (msg["date"] or "") + (msg["from"] or "")
+        guid = hashlib.md5(unique_string.encode(), usedforsecurity=False).hexdigest()
+        date_str = msg["date"] or ""
+    except Exception:
+        subject = row.subject or ""
+        guid = ""
+        date_str = ""
+
+    domain = _sender_domain(row.sender)
+    favicon_raw = (
+        f"https://www.google.com/s2/favicons?domain={domain}&sz=128"
+        if domain else None
+    )
+    local_part = row.sender.split("@", 1)[0] if "@" in row.sender else row.sender
+    letter = local_part[0].upper() if local_part else "?"
+
+    # preview_image_url semantics:
+    #   None = never inspected (pre-migration); "" = inspected, no image; "http..." = usable URL
+    preview = row.preview_image_url
+    image_url = sign_url(preview) if preview else None
+
+    return {
+        "sender": row.sender,
+        "subject": subject,
+        "date_str": date_str,
+        "relative_date": util.relative_date(row.timestamp) if row.timestamp else "",
+        "guid": guid,
+        "feed_name": _sanitize_feed_name(row.sender),
+        "image_url": image_url,
+        "is_read": bool(row.is_read),
+        "is_starred": bool(row.is_starred),
+        "sender_favicon_url": sign_url(favicon_raw) if favicon_raw else None,
+        "monogram_letter": letter,
+        "monogram_hue": util.monogram_hue(row.sender),
+    }
+
+
+def get_landing_data(latest_limit: int = 10, per_sender_limit: int = 10) -> dict:
+    """Return the landing-page payload. See spec for shape details."""
+    from common import get_img_proxy_secret, config
+    import img_proxy
+
+    secret = get_img_proxy_secret()
+    base = (config.get("server_baseurl") or "").rstrip("/")
+
+    def sign(url):
+        if not url:
+            return None
+        return img_proxy.sign_url(url, secret, base)
+
+    with Session() as session:
+        # Latest across all senders
+        latest_rows = (
+            session.query(Email)
+            .order_by(Email.timestamp.desc())
+            .limit(latest_limit)
+            .all()
+        )
+        latest = [_article_dict(r, sign) for r in latest_rows]
+
+        # Per-sender: get each sender's most recent timestamp (for row ordering)
+        from sqlalchemy import func
+        sender_tops = (
+            session.query(Email.sender, func.max(Email.timestamp).label("t_max"),
+                          func.count(Email.id).label("article_count"))
+            .group_by(Email.sender)
+            .order_by(func.max(Email.timestamp).desc())
+            .all()
+        )
+
+        rows = []
+        for sender, _t_max, article_count in sender_tops:
+            sender_articles = (
+                session.query(Email)
+                .filter_by(sender=sender)
+                .order_by(Email.timestamp.desc())
+                .limit(per_sender_limit)
+                .all()
+            )
+            if not sender_articles:
+                continue
+            dicts = [_article_dict(r, sign) for r in sender_articles]
+            first = dicts[0]
+            rows.append({
+                "sender": sender,
+                "feed_name": first["feed_name"],
+                "favicon_url": first["sender_favicon_url"],
+                "monogram_letter": first["monogram_letter"],
+                "monogram_hue": first["monogram_hue"],
+                "article_count": int(article_count),
+                "articles": dicts,
+            })
+
+        return {"latest": latest, "rows": rows}
