@@ -264,22 +264,28 @@ def test_fetch_image_rejects_documentation_range(monkeypatch):
 
 
 def test_pinned_ip_adapter_sets_tls_sni_for_https(monkeypatch):
-    """After URL rewrite to pinned IP, server_hostname and assert_hostname must
-    still be the real hostname — otherwise TLS cert validation fails for HTTPS."""
+    """After URL rewrite to pinned IP, TLS still needs the real hostname.
+
+    Contract:
+    - `server_hostname` goes into `conn_kw` (urllib3's channel for SNI)
+    - `assert_hostname` goes on the pool as an attribute (NOT in conn_kw);
+      urllib3 passes `assert_hostname` as an explicit kwarg at connection
+      creation, so putting it in `conn_kw` too would raise TypeError
+      'got multiple values for keyword argument' (prod regression 2026-04).
+    """
     import requests
     import requests.adapters
 
     adapter = img_proxy.PinnedIPAdapter(pinned_host="example.com", pinned_ip="93.184.216.34")
 
-    # Minimal fake pool to verify conn_kw is patched
     class FakePool:
         def __init__(self):
             self.conn_kw = {}
+            self.assert_hostname = None  # urllib3 default
 
     fake_conn = FakePool()
 
     def fake_super_get(self, request, verify, proxies=None, cert=None):
-        # Simulate what urllib3 would return — the pool keyed by the rewritten URL
         return fake_conn
 
     monkeypatch.setattr(
@@ -288,8 +294,14 @@ def test_pinned_ip_adapter_sets_tls_sni_for_https(monkeypatch):
         fake_super_get,
     )
 
-    # Build a minimal request object
     req = requests.Request("GET", "https://93.184.216.34:443/x.png").prepare()
     conn = adapter.get_connection_with_tls_context(req, verify=True)
+
+    # server_hostname channel: conn_kw
     assert conn.conn_kw.get("server_hostname") == "example.com"
-    assert conn.conn_kw.get("assert_hostname") == "example.com"
+    # assert_hostname channel: pool attribute, NOT conn_kw
+    assert conn.assert_hostname == "example.com"
+    assert "assert_hostname" not in conn.conn_kw, (
+        "putting assert_hostname in conn_kw collides with urllib3's explicit "
+        "kwarg and raises TypeError at connection creation"
+    )
