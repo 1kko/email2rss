@@ -164,6 +164,42 @@ def test_clean_drops_svg_tag():
     assert "<p>ok</p>" in out
 
 
+def test_clean_preserves_style_tag_contents():
+    """Newsletter <style> blocks must survive (so layout CSS applies inside the
+    sandboxed iframe, not leaked as visible text). Defense-in-depth against
+    malicious CSS comes from the iframe's inner CSP: default-src 'none' plus
+    img-src {proxy_origin} data: blocks every CSS-initiated external fetch
+    (background-image URLs, @import, @font-face, etc.)."""
+    html = (
+        '<style>@media (max-width: 640px) { .col { width: 100% !important; } }</style>'
+        '<p>body</p>'
+    )
+    out = reader.clean_and_rewrite(html, {}, _identity_sign)
+    # <style> tag survives (so CSS applies in-iframe, not leaked as inert text)
+    assert "<style>" in out.lower() or "<style " in out.lower()
+    # Safe CSS rules preserved
+    assert "@media" in out
+    assert "max-width" in out
+    # Body content preserved
+    assert "<p>body</p>" in out
+
+
+def test_style_tag_css_is_not_rendered_as_visible_text():
+    """Regression guard for the production bug where <style> blocks were being
+    stripped by bleach, leaving their CSS rules as visible text in the reader."""
+    css_rule = "body { color: red; }"
+    out = reader.clean_and_rewrite(f"<style>{css_rule}</style><p>hi</p>", {}, _identity_sign)
+    # The <style> tag wraps the CSS, so there's no text node containing just the CSS
+    # outside a <style> tag. Simple assertion: the <style> element is present.
+    assert "<style" in out.lower()
+    # And the output between </style> and <p>hi</p> does not contain the CSS rule
+    # (if bleach had stripped <style>, the CSS text would appear bare).
+    import re
+    after_style = re.search(r'</style>(.*)$', out, re.DOTALL)
+    assert after_style is not None
+    assert css_rule not in after_style.group(1)
+
+
 def test_clean_survives_malformed_html():
     """Unclosed tags, bare attr values — bleach + html5lib normalize and strip
     the dangerous <script>. Inner text may survive as inert text (see note in
