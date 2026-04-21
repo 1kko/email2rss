@@ -81,12 +81,19 @@ class PinnedIPAdapter(HTTPAdapter):
         conn = super().get_connection_with_tls_context(
             request, verify, proxies=proxies, cert=cert
         )
-        # urllib3 HTTPSConnectionPool stores conn_kw as a dict of kwargs forwarded
-        # to each new HTTPSConnection. Copy-on-write to avoid mutating a shared pool.
+        # The returned "conn" is an HTTPSConnectionPool. urllib3 creates each
+        # concrete HTTPSConnection by passing (a) some attributes explicitly
+        # from the pool (`assert_hostname` is one of them) and (b) `**conn_kw`.
+        # Putting `assert_hostname` into conn_kw collides with the explicit
+        # kwarg → TypeError "got multiple values for assert_hostname".
+        # Set it as a pool attribute instead; urllib3 will forward it once.
+        if hasattr(conn, "assert_hostname"):
+            conn.assert_hostname = self.pinned_host
+        # server_hostname is not an explicit pool attribute, so passing it via
+        # conn_kw is the correct channel for TLS SNI.
         if hasattr(conn, "conn_kw"):
             conn.conn_kw = dict(conn.conn_kw or {})
             conn.conn_kw["server_hostname"] = self.pinned_host
-            conn.conn_kw["assert_hostname"] = self.pinned_host
         return conn
 
     def send(self, request, **kwargs):
