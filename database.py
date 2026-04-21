@@ -332,3 +332,24 @@ def get_emails_by_sender_with_metadata(sender: str):
                 continue
 
         return result
+
+
+def delete_emails_older_than(cutoff: datetime.datetime) -> int:
+    """
+    Delete emails with timestamp < cutoff. Returns the number of rows deleted.
+
+    Does NOT run VACUUM afterwards. The project uses WAL mode with a concurrent
+    reader process (feed_server); VACUUM would require an exclusive lock that
+    conflicts with the reader's open read transaction. SQLite reuses the freed
+    pages for subsequent inserts, so the row count stays bounded; the file size
+    doesn't shrink but also doesn't grow unbounded. To reclaim on-disk space,
+    stop the app and run `sqlite3 emails.db "VACUUM"` by hand.
+    """
+    with Session() as session:
+        deleted = (
+            session.query(Email)
+            .filter(Email.timestamp < cutoff)
+            .delete(synchronize_session=False)
+        )
+        session.commit()
+    return deleted
