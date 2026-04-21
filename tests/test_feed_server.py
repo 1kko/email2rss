@@ -367,3 +367,53 @@ def test_search_route_invalid_query_renders_error(client, db_session):
     assert resp.status_code == 200
     body = resp.data.decode("utf-8")
     assert "Search error" in body or "error" in body.lower()
+
+
+def test_home_route_renders_feed_grid(client, db_session, monkeypatch):
+    from tests.conftest import insert_email
+    monkeypatch.setitem(feed_server.config, "server_baseurl", "http://testserver")
+    insert_email(db_session, email_id=1, sender="alice@example.com")
+
+    resp = client.get("/")
+    assert resp.status_code == 200
+    body = resp.data.decode("utf-8")
+    assert "feed-row" in body
+    assert "article-card" in body
+    assert "alice@example.com" in body
+
+
+def test_home_route_empty_state(client, db_session):
+    resp = client.get("/")
+    assert resp.status_code == 200
+    body = resp.data.decode("utf-8")
+    assert "No feeds yet" in body
+
+
+def test_home_route_includes_latest_section(client, db_session, monkeypatch):
+    from tests.conftest import insert_email
+    monkeypatch.setitem(feed_server.config, "server_baseurl", "http://testserver")
+    insert_email(db_session, email_id=1)
+
+    resp = client.get("/")
+    body = resp.data.decode("utf-8")
+    assert "latest-section" in body or "Latest" in body
+
+
+def test_list_route_renders_xml_filenames(client, tmp_path, monkeypatch):
+    """/list lists the XML files in FEED_DIR (same content the old / used to show)."""
+    (tmp_path / "hello_example_com.xml").write_text("<rss/>", encoding="utf-8")
+    (tmp_path / "team_example_com.xml").write_text("<rss/>", encoding="utf-8")
+
+    resp = client.get("/list")
+    assert resp.status_code == 200
+    body = resp.data.decode("utf-8")
+    assert 'href="/hello_example_com.xml"' in body
+    assert 'href="/team_example_com.xml"' in body
+
+
+def test_list_route_empty_feed_dir(client, tmp_path):
+    resp = client.get("/list")
+    assert resp.status_code == 200
+    body = resp.data.decode("utf-8")
+    # No file links, but page still renders
+    assert "<ul>" in body or "No feeds" in body or "RSS Feeds" in body

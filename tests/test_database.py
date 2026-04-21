@@ -358,3 +358,183 @@ def test_fts_subject_is_html_escaped(db_session):
     # Search still finds it via the distinctive token
     results = db.search_emails("XssProbeToken")
     assert len(results) == 1
+
+
+def test_email_model_has_preview_image_url_column(db_session):
+    """Fresh in-memory DB should have the new column, default None."""
+    insert_email(db_session, email_id=1)
+    row = db_session.query(db.Email).filter_by(email_id=1).first()
+    assert row.preview_image_url is None
+
+
+def test_save_email_populates_preview_image_url(db_session):
+    content = (
+        b"From: s@example.com\r\n"
+        b"Subject: t\r\n"
+        b"MIME-Version: 1.0\r\n"
+        b"Content-Type: text/html; charset=utf-8\r\n\r\n"
+        b'<p>body</p><img src="http://cdn.example.com/hero.jpg" width="600" height="400">'
+    )
+    db.save_email(
+        sender="s@example.com", receiver="me@localhost", email_id=2,
+        subject="t", content=content, timestamp=datetime.datetime(2026, 4, 13),
+    )
+    row = db_session.query(db.Email).filter_by(email_id=2).first()
+    assert row.preview_image_url == "http://cdn.example.com/hero.jpg"
+
+
+def test_save_email_leaves_preview_null_when_no_usable_image(db_session):
+    content = (
+        b"From: s@example.com\r\n"
+        b"Subject: t\r\n"
+        b"MIME-Version: 1.0\r\n"
+        b"Content-Type: text/html; charset=utf-8\r\n\r\n"
+        b"<p>no images</p>"
+    )
+    db.save_email(
+        sender="s@example.com", receiver="me@localhost", email_id=3,
+        subject="t", content=content, timestamp=datetime.datetime(2026, 4, 13),
+    )
+    row = db_session.query(db.Email).filter_by(email_id=3).first()
+    # Empty string sentinel = inspected, no image. Contrast with NULL = never inspected.
+    assert row.preview_image_url == ""
+
+
+def test_backfill_skips_rows_already_inspected_with_empty_sentinel(db_session):
+    """Rows with preview_image_url = '' (inspected, no image) should NOT be
+    reprocessed on subsequent backfill runs."""
+    from sqlalchemy import text as _text
+
+    # Insert a row without an image — save_email writes "" sentinel
+    content = (
+        b"From: s@example.com\r\n"
+        b"Subject: t\r\n"
+        b"MIME-Version: 1.0\r\n"
+        b"Content-Type: text/html; charset=utf-8\r\n\r\n"
+        b"<p>no images</p>"
+    )
+    db.save_email(
+        sender="s@example.com", receiver="me@localhost", email_id=99,
+        subject="t", content=content, timestamp=datetime.datetime(2026, 4, 13),
+    )
+
+    # Backfill: should find zero NULL rows and do nothing
+    with db.engine.connect() as conn:
+        null_count_before = conn.execute(
+            _text("SELECT COUNT(*) FROM emails WHERE preview_image_url IS NULL")
+        ).scalar()
+        db._backfill_preview_images(conn)
+        null_count_after = conn.execute(
+            _text("SELECT COUNT(*) FROM emails WHERE preview_image_url IS NULL")
+        ).scalar()
+
+    assert null_count_before == 0
+    assert null_count_after == 0
+    # Value unchanged: still the inspected-no-image sentinel
+    row = db_session.query(db.Email).filter_by(email_id=99).first()
+    assert row.preview_image_url == ""
+
+
+def test_backfill_preview_images_populates_existing_rows(db_session):
+    """Simulate a pre-migration DB: insert a row with an image, then clear
+    preview_image_url, then run _backfill_preview_images."""
+    from sqlalchemy import text as _text
+
+    content = (
+        b"From: s@example.com\r\n"
+        b"Subject: t\r\n"
+        b"MIME-Version: 1.0\r\n"
+        b"Content-Type: text/html; charset=utf-8\r\n\r\n"
+        b'<img src="http://x.com/pic.jpg" width="600" height="400">'
+    )
+    db.save_email(
+        sender="s@example.com", receiver="me@localhost", email_id=4,
+        subject="t", content=content, timestamp=datetime.datetime(2026, 4, 13),
+    )
+    # Reset to simulate pre-column state
+    with db.engine.connect() as conn:
+        conn.execute(_text("UPDATE emails SET preview_image_url = NULL"))
+        conn.commit()
+        db._backfill_preview_images(conn)
+
+    row = db_session.query(db.Email).filter_by(email_id=4).first()
+    assert row.preview_image_url == "http://x.com/pic.jpg"
+
+
+def test_get_landing_data_empty_db(db_session):
+    data = db.get_landing_data(latest_limit=10, per_sender_limit=10)
+    assert data == {"latest": [], "rows": []}
+
+
+def test_get_landing_data_returns_latest_and_rows(db_session):
+    # alice: 2 articles. bob: 1 article.
+    insert_email(db_session, email_id=1, sender="alice@example.com",
+                 timestamp=datetime.datetime(2026, 4, 10))
+    insert_email(db_session, email_id=2, sender="alice@example.com",
+                 timestamp=datetime.datetime(2026, 4, 15))
+    insert_email(db_session, email_id=3, sender="bob@example.com",
+                 timestamp=datetime.datetime(2026, 4, 12))
+
+    data = db.get_landing_data(latest_limit=10, per_sender_limit=10)
+    assert len(data["latest"]) == 3
+    # Latest ordered by timestamp desc
+    assert data["latest"][0]["sender"] == "alice@example.com"  # 2026-04-15
+    assert data["latest"][1]["sender"] == "bob@example.com"    # 2026-04-12
+    assert data["latest"][2]["sender"] == "alice@example.com"  # 2026-04-10
+
+    # Rows ordered by each sender's newest article desc — alice (04-15) before bob (04-12)
+    assert [r["sender"] for r in data["rows"]] == ["alice@example.com", "bob@example.com"]
+    alice_row = data["rows"][0]
+    bob_row = data["rows"][1]
+    assert alice_row["article_count"] == 2
+    assert bob_row["article_count"] == 1
+    # Per-row articles sorted newest-first
+    assert len(alice_row["articles"]) == 2
+    assert alice_row["articles"][0]["sender"] == "alice@example.com"
+
+
+def test_get_landing_data_limits_latest(db_session):
+    for i in range(15):
+        insert_email(db_session, email_id=i,
+                     timestamp=datetime.datetime(2026, 4, 10) + datetime.timedelta(hours=i))
+    data = db.get_landing_data(latest_limit=5, per_sender_limit=10)
+    assert len(data["latest"]) == 5
+
+
+def test_get_landing_data_limits_per_sender(db_session):
+    for i in range(15):
+        insert_email(db_session, email_id=i, sender="alice@example.com",
+                     timestamp=datetime.datetime(2026, 4, 10) + datetime.timedelta(hours=i))
+    data = db.get_landing_data(latest_limit=10, per_sender_limit=5)
+    assert data["rows"][0]["article_count"] == 15
+    assert len(data["rows"][0]["articles"]) == 5
+
+
+def test_get_landing_data_includes_favicon_and_monogram(db_session):
+    insert_email(db_session, email_id=1, sender="alice@example.com")
+    data = db.get_landing_data()
+    row = data["rows"][0]
+    assert row["favicon_url"]  # non-empty signed URL
+    assert row["monogram_letter"] == "A"
+    assert 0 <= row["monogram_hue"] < 360
+
+
+def test_get_landing_data_signs_preview_urls(db_session):
+    """preview_image_url values flow through img_proxy.sign_url — each card's
+    image_url should start with the /img? prefix, not be the bare remote URL."""
+    content = (
+        b"From: s@example.com\r\n"
+        b"Subject: t\r\n"
+        b"MIME-Version: 1.0\r\n"
+        b"Content-Type: text/html; charset=utf-8\r\n\r\n"
+        b'<img src="http://cdn.example.com/hero.jpg" width="600" height="400">'
+    )
+    db.save_email(
+        sender="s@example.com", receiver="me@localhost", email_id=1,
+        subject="t", content=content, timestamp=datetime.datetime(2026, 4, 13),
+    )
+    data = db.get_landing_data()
+    article = data["latest"][0]
+    assert article["image_url"]
+    assert "/img?u=" in article["image_url"]
+    assert "&sig=" in article["image_url"]

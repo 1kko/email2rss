@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}email2rss — XML feed list{% endblock %}
+{% block body %}
+<h1>RSS Feeds (XML)</h1>
+<p>Direct XML URLs for RSS readers. For the styled landing, <a href="/">go back to /</a>.</p>
+{% if entries %}
+<ul>
+  {% for name in entries %}
+    <li><a href="/{{ name }}">{{ name }}</a></li>
+  {% endfor %}
+</ul>
+{% else %}
+<p>No feeds yet. The IMAP fetcher will populate feeds once emails are fetched and RSS files are generated.</p>
+{% endif %}
+{% endblock %}
