@@ -90,9 +90,15 @@ ALLOWED_TAGS = frozenset({
     "caption", "cite", "code", "div", "dl", "dt", "dd", "em", "figure", "figcaption",
     "footer", "h1", "h2", "h3", "h4", "h5", "h6", "header", "hr", "i", "img", "kbd",
     "label", "li", "main", "mark", "nav", "ol", "p", "pre", "q", "s", "section",
-    "small", "span", "strike", "strong", "sub", "summary", "sup", "table", "tbody",
-    "td", "tfoot", "th", "thead", "time", "tr", "u", "ul",
+    "small", "span", "strike", "strong", "style", "sub", "summary", "sup", "table",
+    "tbody", "td", "tfoot", "th", "thead", "time", "tr", "u", "ul",
 })
+# NOTE: <style> is allowed because email newsletters heavily rely on inline
+# <style> blocks for layout (@media queries for mobile, responsive tables).
+# Without it, bleach strip=True drops the <style> tag but keeps the CSS rules
+# as visible text nodes inside the rendered body. bleach's CSSSanitizer still
+# cleans the inner CSS of URL references and dangerous values. Safe inside
+# our sandboxed iframe (styles cannot escape to the parent page).
 
 ALLOWED_ATTRS = {
     "*": ["class", "id", "style", "title"],
