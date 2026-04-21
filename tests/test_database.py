@@ -461,6 +461,66 @@ def test_backfill_preview_images_populates_existing_rows(db_session):
     assert row.preview_image_url == "http://x.com/pic.jpg"
 
 
+def test_migrate_v1_invalidates_and_rebackfills_preview_image_url(db_session):
+    """
+    v1 migration: pre-v1 rows have preview_image_url values cached before the
+    logo-filter + largest-image extractor landed. Running migrate_database()
+    on a user_version=0 DB nulls them, then _backfill_preview_images re-extracts
+    with current logic. user_version bumps to 1.
+    """
+    content = (
+        b"From: s@example.com\r\nSubject: t\r\n"
+        b"MIME-Version: 1.0\r\n"
+        b"Content-Type: text/html; charset=utf-8\r\n\r\n"
+        b'<img src="http://x.com/real-hero.jpg" width="600" height="400">'
+    )
+    db.save_email(
+        sender="s@example.com", receiver="me@localhost", email_id=777,
+        subject="t", content=content, timestamp=datetime.datetime(2026, 4, 13),
+    )
+    # Simulate stale cached logo URL + pre-v1 schema version
+    with db.engine.connect() as conn:
+        conn.execute(text(
+            "UPDATE emails SET preview_image_url = 'http://cdn.x.com/stale-logo.png' "
+            "WHERE email_id = 777"
+        ))
+        conn.execute(text("PRAGMA user_version = 0"))
+        conn.commit()
+
+    db.migrate_database()
+
+    with db.engine.connect() as conn:
+        uv = conn.execute(text("PRAGMA user_version")).scalar()
+    assert uv == 1
+
+    db_session.expire_all()
+    row = db_session.query(db.Email).filter_by(email_id=777).first()
+    assert row.preview_image_url == "http://x.com/real-hero.jpg"
+
+
+def test_migrate_v1_idempotent_when_user_version_is_1(db_session):
+    """Second run of migrate_database must NOT null already-valid preview_image_url."""
+    content = b"From: s@example.com\r\nSubject: t\r\n\r\nbody"
+    db.save_email(
+        sender="s@example.com", receiver="me@localhost", email_id=888,
+        subject="t", content=content, timestamp=datetime.datetime(2026, 4, 13),
+    )
+    # Simulate post-v1 state: set user_version=1 and a specific preview URL
+    with db.engine.connect() as conn:
+        conn.execute(text(
+            "UPDATE emails SET preview_image_url = 'http://keep.me/pic.png' "
+            "WHERE email_id = 888"
+        ))
+        conn.execute(text("PRAGMA user_version = 1"))
+        conn.commit()
+
+    db.migrate_database()
+
+    db_session.expire_all()
+    row = db_session.query(db.Email).filter_by(email_id=888).first()
+    assert row.preview_image_url == "http://keep.me/pic.png"
+
+
 def test_get_landing_data_empty_db(db_session):
     data = db.get_landing_data(latest_limit=10, per_sender_limit=10)
     assert data == {"latest": [], "rows": []}
