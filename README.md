@@ -50,6 +50,7 @@ enable_internal_reader=false
 | `refresh_seconds` | Interval between email fetches | `300` |
 | `data_dir` | Directory for database and RSS files | `data` |
 | `max_item_per_feed` | Maximum items per RSS feed | `100` |
+| `retention_days` | Delete emails older than N days at start of each fetch cycle; unset or `0` disables purging | unset |
 | `server_baseurl` | Base URL for RSS feed links | Optional |
 | `bind_address` | Address the HTTP server binds to | `127.0.0.1` |
 | `enable_internal_reader` | Enable internal article viewer | `false` |
@@ -70,6 +71,12 @@ The internal RSS reader is an optional feature that allows you to read email con
 - Clicking an item displays the full email HTML content in a clean, readable format
 - No external requests needed - all content served from your database
 - Ideal for email-only content or when you want to read everything in one place
+
+### Reliability
+
+- **Connection retry** — `email_fetcher` retries the IMAP connection up to 4 times with exponential backoff (delays 0, 1, 2, 4 seconds) before giving up on a cycle.
+- **Per-email resilience** — a malformed individual email (bad MIME, unparseable date) is logged and skipped rather than aborting the whole fetch cycle. IMAP-level errors (connection dropped) still abort the cycle so the next cycle can reconnect cleanly.
+- **Retention** — set `retention_days=N` in `.env` to purge emails older than N days at the start of each fetch cycle.
 
 ### Enabling the Internal Reader
 
