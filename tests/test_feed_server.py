@@ -5,7 +5,9 @@ tests that pin a known bug: abort(404) inside view_article is swallowed by
 a broad `except Exception` handler and re-raised as 500. These tests should
 be updated to assert 404 when the bug is fixed.
 """
+import base64 as _b64mod
 import hashlib
+import socket as _socket_mod
 
 from defusedxml.ElementTree import fromstring as safe_fromstring
 
@@ -97,3 +99,59 @@ def test_article_route_swallows_404_as_500_for_unknown_feed(client, db_session):
     # raised by abort(404) and re-aborts as 500. Characterized here; fix should
     # narrow the catch (e.g., `except HTTPException: raise`) and flip assertion.
     assert resp.status_code == 500
+
+
+def _build_signed_img_url(original_url, secret):
+    import img_proxy
+    u = _b64mod.urlsafe_b64encode(original_url.encode()).decode().rstrip("=")
+    sig = img_proxy._compute_sig(u, secret)
+    return f"/img?u={u}&sig={sig}"
+
+
+def test_img_route_rejects_bad_signature(client, monkeypatch):
+    resp = client.get("/img?u=aHR0cDovL2V4YW1wbGUuY29tL3gucG5n&sig=deadbeef")
+    assert resp.status_code == 403
+
+
+def test_img_route_rejects_missing_signature(client):
+    resp = client.get("/img?u=aHR0cDovL2V4YW1wbGUuY29tL3gucG5n")
+    assert resp.status_code == 403
+
+
+def test_img_route_rejects_missing_u(client):
+    resp = client.get("/img?sig=deadbeef")
+    assert resp.status_code == 400
+
+
+def test_img_route_happy_path(client, monkeypatch):
+    import common
+
+    secret = common.get_img_proxy_secret()
+    url = _build_signed_img_url("http://example.com/x.png", secret)
+
+    def fake_getaddrinfo(host, port, **kw):
+        return [(_socket_mod.AF_INET, _socket_mod.SOCK_STREAM, 6, "", ("93.184.216.34", port))]
+    monkeypatch.setattr(_socket_mod, "getaddrinfo", fake_getaddrinfo)
+
+    png = b"\x89PNG\r\n\x1a\n" + b"\x00" * 50
+
+    class FakeResp:
+        status_code = 200
+        headers = {"Content-Type": "image/png"}
+
+        def iter_content(self, chunk_size=None):
+            return iter([png])
+
+        def close(self):
+            pass
+
+    def fake_send(self, req, **kw):
+        return FakeResp()
+    monkeypatch.setattr("requests.Session.send", fake_send)
+
+    resp = client.get(url)
+    assert resp.status_code == 200
+    assert resp.mimetype == "image/png"
+    assert resp.headers.get("Cache-Control", "").startswith("public")
+    assert resp.headers.get("X-Content-Type-Options") == "nosniff"
+    assert resp.data == png

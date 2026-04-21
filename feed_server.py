@@ -4,16 +4,18 @@ Flask app serving RSS feeds, OPML subscription files, and the optional internal 
 """
 from __future__ import annotations
 
+import base64
 import email as email_mod
 import email.header
 import os
 import ssl
 from pathlib import Path
 
-from flask import Flask, abort, jsonify, render_template, send_from_directory
+from flask import Flask, Response, abort, jsonify, render_template, request, send_from_directory
 
 import database as db
-from common import logging, config
+import img_proxy
+from common import logging, config, get_img_proxy_secret
 from util import cleanse_content, sanitize_html
 
 
@@ -97,7 +99,6 @@ def create_app() -> Flask:
 
     @app.before_request
     def _log_request():
-        from flask import request
         safe_path = request.path.replace("\n", "").replace("\r", "")
         logging.info(f"Serving ip={request.remote_addr} path={safe_path}")
 
@@ -187,6 +188,38 @@ def create_app() -> Flask:
             "index.html",
             entries=entries,
             enable_internal_reader=bool(config.get("enable_internal_reader")),
+        )
+
+    @app.get("/img")
+    def image_proxy_route():
+        u = request.args.get("u", "")
+        sig = request.args.get("sig", "")
+        if not u:
+            abort(400)
+        if not sig:
+            abort(403)
+
+        secret = get_img_proxy_secret()
+        if not img_proxy.verify_signature(u, sig, secret):
+            abort(403)
+
+        try:
+            pad = "=" * (-len(u) % 4)
+            url = base64.urlsafe_b64decode(u + pad).decode("utf-8")
+        except Exception:
+            logging.warning("Failed to decode /img u param: %r", u)
+            abort(400)
+
+        body, ctype = img_proxy.fetch_image(url, secret)
+        return Response(
+            body,
+            mimetype=ctype,
+            headers={
+                "Cache-Control": "public, max-age=604800",
+                "Content-Security-Policy": "default-src 'none'",
+                "X-Content-Type-Options": "nosniff",
+                "Referrer-Policy": "no-referrer",
+            },
         )
 
     @app.get("/<path:filename>")
