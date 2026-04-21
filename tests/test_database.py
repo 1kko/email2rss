@@ -2,6 +2,7 @@
 import datetime
 
 from sqlalchemy import text
+from sqlalchemy import text as db_text
 
 import database as db
 from tests.conftest import insert_email
@@ -104,3 +105,59 @@ def test_delete_emails_older_than_zero_rows_is_noop(db_session):
     deleted = db.delete_emails_older_than(datetime.datetime(2026, 1, 1))
     assert deleted == 0
     assert db.get_entry_count() == 1
+
+
+def test_email_model_has_is_read_and_is_starred_columns(db_session):
+    """Fresh in-memory DB should have the new columns with False defaults."""
+    insert_email(db_session, email_id=1)
+    row = db_session.query(db.Email).first()
+    assert row.is_read is False
+    assert row.is_starred is False
+
+
+def test_fts_table_exists_after_migration(db_session):
+    """emails_fts virtual table should exist after migrate_database."""
+    with db.engine.connect() as conn:
+        row = conn.execute(
+            db_text("SELECT name FROM sqlite_master WHERE type='table' AND name='emails_fts'")
+        ).fetchone()
+    assert row is not None
+
+
+def test_fts_index_populated_by_save_email(db_session):
+    """save_email should also insert into emails_fts so search finds the new row."""
+    content = (
+        b"From: s@example.com\nSubject: Indexable subject\n"
+        b"Date: Mon, 13 Apr 2026 10:00:00 +0000\n\nlookup me please"
+    )
+    db.save_email(
+        sender="s@example.com",
+        receiver="me@localhost",
+        email_id=200,
+        subject="Indexable subject",
+        content=content,
+        timestamp=datetime.datetime(2026, 4, 13),
+    )
+    fts_sql = (
+        "SELECT subject, body_text FROM emails_fts"
+        " WHERE rowid = (SELECT id FROM emails WHERE email_id = 200)"
+    )
+    with db.engine.connect() as conn:
+        row = conn.execute(db_text(fts_sql)).fetchone()
+    assert row is not None
+    assert "Indexable subject" in row[0]
+    assert "lookup me please" in row[1]
+
+
+def test_fts_delete_trigger_cleans_up(db_session):
+    """Deleting from emails should remove the matching FTS row via trigger."""
+    db.save_email(
+        sender="s@example.com", receiver="me@localhost", email_id=201,
+        subject="gone soon", content=b"From: s@example.com\nSubject: gone soon\n\nbody",
+        timestamp=datetime.datetime(2026, 4, 13),
+    )
+    db.delete_emails_older_than(datetime.datetime(2099, 1, 1))  # deletes everything
+
+    with db.engine.connect() as conn:
+        fts_count = conn.execute(db_text("SELECT COUNT(*) FROM emails_fts")).scalar()
+    assert fts_count == 0
