@@ -273,6 +273,19 @@ def extract_plain_text(msg) -> str:
 _TRACKING_FILENAME_HINTS = ("pixel", "track", "open", "beacon", "spacer")
 _BRAND_FILENAME_HINTS = ("logo", "brand", "header-image", "footer-image", "masthead", "sig-")
 _MIN_IMAGE_PX = 50
+_BANNER_ASPECT_RATIO = 3.5  # width/height above this looks like newsletter masthead
+
+
+def _is_banner_shaped(width: int, height: int) -> bool:
+    """
+    True when width/height > _BANNER_ASPECT_RATIO. Newsletter masthead banners
+    are almost always very wide strips (e.g. 600x100 → 6:1) while real content
+    hero images are ≤ 16:9 (~1.78:1). We only flag wide-and-short; tall images
+    are portrait photos, not banners.
+    """
+    if height <= 0:
+        return False
+    return (width / height) > _BANNER_ASPECT_RATIO
 
 
 def extract_preview_image(msg) -> str | None:
@@ -282,11 +295,14 @@ def extract_preview_image(msg) -> str | None:
 
     Selection strategy:
     1. Collect all <img> candidates that pass the filter rules below.
-    2. If at least one candidate has both width and height declared, return the
-       candidate with the largest area (width × height). This beats the earlier
-       "first-usable" approach that tended to pick the newsletter logo, since
-       logos are usually near the top and smaller than the article's hero image.
-    3. If no candidate has declared dimensions, return the first one (best we
+    2. Among candidates with declared dimensions, prefer non-banner-shaped ones
+       (width/height ≤ _BANNER_ASPECT_RATIO). Banner-shaped images are template
+       mastheads repeated across every email from a sender — they produce
+       identical thumbnails for every article. If any non-banner candidate
+       exists, return the largest by area.
+    3. If every candidate is banner-shaped, fall back to the largest of those
+       (better than no image).
+    4. If no candidate has declared dimensions, return the first one (best we
        can do without rendering the email to measure images).
 
     Filter rules (each applies before a candidate is considered):
@@ -304,7 +320,8 @@ def extract_preview_image(msg) -> str | None:
     if not body_html:
         return None
 
-    candidates: list[tuple[int, str]] = []  # (area, src); area=-1 when unknown
+    # (area, width, height, src) — width/height retained for aspect-ratio test
+    candidates: list[tuple[int, int, int, str]] = []
     first_unknown_area: str | None = None
 
     for match in re.finditer(r'<img\b([^>]*)>', body_html, flags=re.IGNORECASE):
@@ -341,16 +358,17 @@ def extract_preview_image(msg) -> str | None:
         if width is not None and height is not None:
             if width < _MIN_IMAGE_PX or height < _MIN_IMAGE_PX:
                 continue
-            candidates.append((width * height, src))
+            candidates.append((width * height, width, height, src))
         else:
             # No declared dimensions — remember the first so we can fall back
             if first_unknown_area is None:
                 first_unknown_area = src
 
-    # Prefer the largest declared candidate
     if candidates:
-        candidates.sort(key=lambda c: c[0], reverse=True)
-        return candidates[0][1]
+        non_banner = [c for c in candidates if not _is_banner_shaped(c[1], c[2])]
+        pool = non_banner if non_banner else candidates
+        pool.sort(key=lambda c: c[0], reverse=True)
+        return pool[0][3]
 
     # Fallback: first image with unknown dimensions
     return first_unknown_area

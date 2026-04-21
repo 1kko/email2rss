@@ -123,6 +123,13 @@ def migrate_database():
             logging.info("Schema v1: invalidating cached preview_image_url values")
             conn.execute(text("UPDATE emails SET preview_image_url = NULL"))
             conn.execute(text("PRAGMA user_version = 1"))
+        if user_version < 2:
+            # v2: Re-invalidate after adding banner-aspect filter. v1's
+            # largest-image heuristic picked newsletter mastheads (600x100-style
+            # banners) because they outweigh the content hero by area.
+            logging.info("Schema v2: invalidating preview_image_url for banner-aware extraction")
+            conn.execute(text("UPDATE emails SET preview_image_url = NULL"))
+            conn.execute(text("PRAGMA user_version = 2"))
 
         conn.commit()
 
