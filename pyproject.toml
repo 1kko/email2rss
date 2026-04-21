@@ -13,7 +13,7 @@ version = "0.2.1"
 description = "Add your description here"
 dependencies = [
     "feedgen>=1.0.0",
-    "python-dotenv>=1.0.1",
+    "python-dotenv>=1.2.2",
     "sqlalchemy>=2.0.30",
     "defusedxml>=0.7.1",
     "flask>=3.0,<4.0",
@@ -50,7 +50,7 @@ packages = ["src/email2rss"]
 [tool.poetry.dependencies]
 python = "^3.10"
 feedgen = "^1.0.0"
-python-dotenv = "^1.0.1"
+python-dotenv = "^1.2.2"
 sqlalchemy = "^2.0.30"
 defusedxml = "^0.7.1"
 flask = ">=3.0,<4.0"
