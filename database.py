@@ -196,7 +196,8 @@ def _backfill_preview_images(conn):
             logging.warning(f"preview backfill: extraction failed for id={row_id}")
         conn.execute(
             text("UPDATE emails SET preview_image_url = :p WHERE id = :id"),
-            {"p": preview, "id": row_id},
+            # "" sentinel = inspected, no usable image (prevents re-parsing on next startup)
+            {"p": preview or "", "id": row_id},
         )
     conn.commit()
     logging.info(f"preview_image_url backfill complete: {len(rows)} rows processed")
@@ -245,11 +246,12 @@ def save_email(
                 text("INSERT INTO emails_fts(rowid, subject, body_text) VALUES (:id, :s, :b)"),
                 {"id": new_email.id, "s": _html_escape.escape(subject or ""), "b": body_text},
             )
-            if preview is not None:
-                session.execute(
-                    text("UPDATE emails SET preview_image_url = :p WHERE id = :id"),
-                    {"p": preview, "id": new_email.id},
-                )
+            # Always write a value — use "" as "inspected, no image" sentinel so
+            # _backfill_preview_images can skip rows we've already checked.
+            session.execute(
+                text("UPDATE emails SET preview_image_url = :p WHERE id = :id"),
+                {"p": preview or "", "id": new_email.id},
+            )
             session.commit()
         else:
             print(f"Email with id {email_id} already exists. Discarding.")

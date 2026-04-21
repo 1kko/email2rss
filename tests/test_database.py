@@ -396,7 +396,43 @@ def test_save_email_leaves_preview_null_when_no_usable_image(db_session):
         subject="t", content=content, timestamp=datetime.datetime(2026, 4, 13),
     )
     row = db_session.query(db.Email).filter_by(email_id=3).first()
-    assert row.preview_image_url is None
+    # Empty string sentinel = inspected, no image. Contrast with NULL = never inspected.
+    assert row.preview_image_url == ""
+
+
+def test_backfill_skips_rows_already_inspected_with_empty_sentinel(db_session):
+    """Rows with preview_image_url = '' (inspected, no image) should NOT be
+    reprocessed on subsequent backfill runs."""
+    from sqlalchemy import text as _text
+
+    # Insert a row without an image — save_email writes "" sentinel
+    content = (
+        b"From: s@example.com\r\n"
+        b"Subject: t\r\n"
+        b"MIME-Version: 1.0\r\n"
+        b"Content-Type: text/html; charset=utf-8\r\n\r\n"
+        b"<p>no images</p>"
+    )
+    db.save_email(
+        sender="s@example.com", receiver="me@localhost", email_id=99,
+        subject="t", content=content, timestamp=datetime.datetime(2026, 4, 13),
+    )
+
+    # Backfill: should find zero NULL rows and do nothing
+    with db.engine.connect() as conn:
+        null_count_before = conn.execute(
+            _text("SELECT COUNT(*) FROM emails WHERE preview_image_url IS NULL")
+        ).scalar()
+        db._backfill_preview_images(conn)
+        null_count_after = conn.execute(
+            _text("SELECT COUNT(*) FROM emails WHERE preview_image_url IS NULL")
+        ).scalar()
+
+    assert null_count_before == 0
+    assert null_count_after == 0
+    # Value unchanged: still the inspected-no-image sentinel
+    row = db_session.query(db.Email).filter_by(email_id=99).first()
+    assert row.preview_image_url == ""
 
 
 def test_backfill_preview_images_populates_existing_rows(db_session):
