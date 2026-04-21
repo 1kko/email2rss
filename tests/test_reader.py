@@ -245,6 +245,19 @@ def test_render_iframe_document_includes_csp_and_body():
     assert "<p>hi</p>" in doc
 
 
+def test_render_iframe_document_forces_dark_mode_via_filter():
+    """
+    In dark mode we invert the html filter so inline email styles (bgcolor=#fff,
+    color:#000) flip to dark. Images/SVG/video get a canceling inverse filter
+    so photos and logos render with their true colors.
+    """
+    doc = reader.render_iframe_document("<p>hi</p>", proxy_origin="http://localhost:8000")
+    assert "@media (prefers-color-scheme: dark)" in doc
+    assert "filter: invert(1) hue-rotate(180deg)" in doc
+    # Verify media elements get their own filter rule for cancellation
+    assert "img, svg, picture, video, canvas" in doc
+
+
 def _make_html_msg(html_body: str, sender="s@example.com"):
     """Build a simple text/html MIME message for tests."""
     import email as email_mod
