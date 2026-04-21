@@ -115,3 +115,61 @@ def test_fetch_emails_aborts_on_imap_error(db_session):
 
     import database as db
     assert db.get_entry_count() == 1  # only A landed
+
+
+def test_main_calls_purge_when_retention_days_set(monkeypatch, fake_imap, db_session):
+    """When retention_days is set, main() calls delete_emails_older_than with
+    a cutoff ~retention_days ago before connecting."""
+    import datetime
+
+    monkeypatch.setattr(email_fetcher.time, "sleep", lambda s: None)
+    monkeypatch.setitem(email_fetcher.config, "retention_days", 7)
+    # Stub out IMAP so the fetch side is a no-op
+    fake_imap.return_value.search.return_value = (None, [b""])
+
+    import database as db
+    delete_calls = []
+
+    def fake_delete(cutoff):
+        delete_calls.append(cutoff)
+        return 0
+    monkeypatch.setattr(db, "delete_emails_older_than", fake_delete)
+
+    email_fetcher.main()
+
+    assert len(delete_calls) == 1
+    cutoff = delete_calls[0]
+    expected = datetime.datetime.utcnow() - datetime.timedelta(days=7)
+    # Cutoff should be within 1 minute of expected
+    assert abs((cutoff - expected).total_seconds()) < 60
+
+
+def test_main_skips_purge_when_retention_days_none(monkeypatch, fake_imap, db_session):
+    monkeypatch.setattr(email_fetcher.time, "sleep", lambda s: None)
+    monkeypatch.setitem(email_fetcher.config, "retention_days", None)
+    fake_imap.return_value.search.return_value = (None, [b""])
+
+    import database as db
+    delete_calls = []
+    monkeypatch.setattr(db, "delete_emails_older_than",
+                        lambda c: delete_calls.append(c) or 0)
+
+    email_fetcher.main()
+
+    assert delete_calls == []
+
+
+def test_main_skips_purge_when_retention_days_zero(monkeypatch, fake_imap, db_session):
+    """retention_days=0 is coerced to None by config; double-check that main() respects it."""
+    monkeypatch.setattr(email_fetcher.time, "sleep", lambda s: None)
+    monkeypatch.setitem(email_fetcher.config, "retention_days", 0)
+    fake_imap.return_value.search.return_value = (None, [b""])
+
+    import database as db
+    delete_calls = []
+    monkeypatch.setattr(db, "delete_emails_older_than",
+                        lambda c: delete_calls.append(c) or 0)
+
+    email_fetcher.main()
+
+    assert delete_calls == []
