@@ -239,14 +239,16 @@ _IFRAME_TEMPLATE = """\
 <base target="_blank">
 <style>
 body {{ font: 16px/1.5 -apple-system, system-ui, sans-serif; color: #222; margin: 0 1rem; }}
-/* Hide the iframe's own scrollbar — parent JS auto-sizes the iframe to its
-   content height, so the outer page is the one that scrolls. Without this,
-   long emails flash an inner scrollbar during load until ResizeObserver
-   fires and grows the iframe. Purely cosmetic; content is not clipped. */
-html {{ scrollbar-width: none; }}
-html::-webkit-scrollbar {{ display: none; }}
-body {{ scrollbar-width: none; }}
-body::-webkit-scrollbar {{ display: none; }}
+/* Kill the iframe's own scroll entirely — parent JS auto-sizes the iframe
+   to its content height, so the outer page is the one that scrolls. Before
+   this, long emails let the user scroll *inside* the iframe while JS was
+   still measuring, so content scrolled for a moment and then "snapped" to
+   the full height once load fired. overflow:hidden prevents any inner
+   scroll from occurring, and scrollbar-width:none hides the phantom
+   scrollbar space. Clipped content appears once JS runs (fast path below
+   fires on first rAF, not waiting for `load`). */
+html, body {{ overflow: hidden; scrollbar-width: none; }}
+html::-webkit-scrollbar, body::-webkit-scrollbar {{ display: none; }}
 /* Center block-level email content. Newsletter templates commonly use
    fixed-width tables (e.g. width:600px) laid out flush-left; `margin: 0 auto`
    centers them within the iframe viewport. Content without a fixed width

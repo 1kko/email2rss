@@ -63,8 +63,16 @@ document.addEventListener('DOMContentLoaded', () => {
   // continuous scroll (no nested scrollbar). Requires allow-same-origin in
   // the iframe sandbox — safe because the inner CSP still forbids scripts,
   // so the iframe can't run JS to exploit same-origin access.
+  //
+  // We start observing BEFORE the iframe's `load` event — load waits for
+  // every subresource (images), which means long emails showed partial
+  // content at 80vh with inner scroll until load finally fired. Polling
+  // via requestAnimationFrame until body exists catches the iframe right
+  // after srcdoc is parsed, so the first paint already has the right
+  // height. ResizeObserver + image-load hooks handle later layout shifts.
   const iframe = document.getElementById('email-body');
   if (iframe) {
+    let observerAttached = false;
     const resize = () => {
       try {
         const doc = iframe.contentDocument;
@@ -76,16 +84,31 @@ document.addEventListener('DOMContentLoaded', () => {
         if (h > 0) iframe.style.height = h + 'px';
       } catch (_) { /* cross-origin or not loaded yet */ }
     };
-    iframe.addEventListener('load', () => {
-      resize();
+    const attachObservers = () => {
+      if (observerAttached) return;
       try {
-        const ro = new ResizeObserver(resize);
-        if (iframe.contentDocument?.body) ro.observe(iframe.contentDocument.body);
-      } catch (_) { /* ResizeObserver unsupported — fall back to image-load hook */ }
-      iframe.contentDocument?.querySelectorAll('img').forEach((img) => {
-        if (!img.complete) img.addEventListener('load', resize);
-      });
-    });
+        const body = iframe.contentDocument && iframe.contentDocument.body;
+        if (!body) return;
+        observerAttached = true;
+        resize();
+        try {
+          const ro = new ResizeObserver(resize);
+          ro.observe(body);
+        } catch (_) { /* ResizeObserver unsupported — image-load hook below still runs */ }
+        iframe.contentDocument.querySelectorAll('img').forEach((img) => {
+          if (!img.complete) img.addEventListener('load', resize);
+        });
+      } catch (_) { /* body not yet ready */ }
+    };
+    // Fast path: poll via rAF until body exists, usually within 1 frame of
+    // srcdoc parse — runs well before the iframe's `load` event.
+    const tryNow = () => {
+      attachObservers();
+      if (!observerAttached) requestAnimationFrame(tryNow);
+    };
+    tryNow();
+    // Safety net: also handle the load event in case rAF polling missed.
+    iframe.addEventListener('load', attachObservers);
   }
 });
 
