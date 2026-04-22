@@ -78,34 +78,6 @@ def create_app() -> Flask:
             "senders": senders,
         })
 
-    @app.get("/article")
-    def article_list():
-        filter_mode = request.args.get("filter", "all")
-        if filter_mode not in ("all", "unread", "starred"):
-            abort(400)
-        articles = db.get_emails_filtered(
-            sender=None, filter_mode=filter_mode, limit=config.get("max_item_per_feed", 100) * 10
-        )
-        # Group by sender for the sidebar
-        senders: dict = {}
-        for article in articles:
-            s = article["sender"]
-            if s not in senders:
-                senders[s] = {"count": 0, "latest": article["timestamp"], "feed_name": article["feed_name"]}
-            senders[s]["count"] += 1
-            if article["timestamp"] > senders[s]["latest"]:
-                senders[s]["latest"] = article["timestamp"]
-        sorted_senders = sorted(senders.items(), key=lambda x: x[1]["latest"], reverse=True)
-
-        return render_template(
-            "article_list.html",
-            page_title="All Articles",
-            articles=articles,
-            senders=sorted_senders,
-            specific_sender=None,
-            filter_mode=filter_mode,
-        )
-
     @app.get("/article/<feed_name>")
     def feed_article_list(feed_name):
         sender_email = feed_name_to_email(feed_name)
@@ -243,8 +215,11 @@ def create_app() -> Flask:
     def home():
         # Landing-page limits are fixed. max_item_per_feed (default 100) drives
         # RSS XML feed size, a separate concern.
-        data = db.get_landing_data(latest_limit=10, per_sender_limit=10)
-        return render_template("index.html", data=data)
+        starred_only = request.args.get("starred") == "1"
+        data = db.get_landing_data(
+            latest_limit=10, per_sender_limit=10, starred_only=starred_only
+        )
+        return render_template("index.html", data=data, starred_only=starred_only)
 
     @app.get("/list")
     def xml_file_list():

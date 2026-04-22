@@ -307,41 +307,30 @@ def test_star_route_allows_missing_origin(client, db_session):
     assert resp.status_code == 200
 
 
-def test_article_list_filter_unread(client, db_session):
+def test_landing_starred_filter_shows_only_starred(client, db_session):
     from tests.conftest import insert_email
-    a = insert_email(db_session, email_id=1, sender="s@example.com")
-    _b = insert_email(db_session, email_id=2, sender="s@example.com")
-    feed_server.db.mark_read(a.id, True)  # a is read
-
-    resp = client.get("/article?filter=unread")
-    assert resp.status_code == 200
-    body = resp.data.decode("utf-8")
-    # Unread list should contain b but not a
-    assert body.count('class="unread"') == 1  # one row with unread class
-
-
-def test_article_list_filter_starred(client, db_session):
-    from tests.conftest import insert_email
-    _a = insert_email(db_session, email_id=1, sender="s@example.com")
-    b = insert_email(db_session, email_id=2, sender="s@example.com")
+    _a = insert_email(db_session, email_id=1, sender="s@example.com",
+                      subject="Unstarred article X")
+    b = insert_email(db_session, email_id=2, sender="s@example.com",
+                     subject="Starred article Y")
     feed_server.db.mark_starred(b.id, True)
 
-    resp = client.get("/article?filter=starred")
+    resp = client.get("/?starred=1")
     assert resp.status_code == 200
     body = resp.data.decode("utf-8")
-    # Only one row should appear (the starred one)
-    assert body.count("<li ") == 1   # <li class="..." ...>
+    assert "Starred article Y" in body
+    assert "Unstarred article X" not in body
 
 
-def test_article_list_default_filter_is_all(client, db_session):
+def test_landing_without_starred_param_shows_all(client, db_session):
     from tests.conftest import insert_email
-    insert_email(db_session, email_id=1)
-    insert_email(db_session, email_id=2)
+    insert_email(db_session, email_id=1, subject="Article one")
+    insert_email(db_session, email_id=2, subject="Article two")
 
-    resp = client.get("/article")  # no filter param
+    resp = client.get("/")
     body = resp.data.decode("utf-8")
-    # Both rows present
-    assert body.count("<li ") == 2
+    assert "Article one" in body
+    assert "Article two" in body
 
 
 def test_search_route_returns_results(client, db_session):

@@ -257,17 +257,22 @@ img {{ max-width: 100%; height: auto; animation: fade-in 0.3s ease-out; }}
 @keyframes fade-in {{ from {{ opacity: 0; }} to {{ opacity: 1; }} }}
 a {{ color: #0066cc; }}
 @media (prefers-color-scheme: dark) {{
-  /* Invert+hue-rotate so inline email styles (color:#000, transparent bg +
-     dark text, etc.) flip to their dark-mode counterparts. Our own
-     declarations must be "pre-inverted": html painted as #e5e5e5 renders
-     as #1a1a1a to the viewer after the filter runs. Setting html to
-     #1a1a1a directly would leave the viewer seeing #e5e5e5 — a light
-     surface where dark inline text (#212121 → #dedede) sits, making the
-     content invisible.
-     Images/SVG/video/canvas get a canceling inverse filter so photos,
-     logos, and charts render with their original colors. */
-  html {{ background: #e5e5e5; filter: invert(1) hue-rotate(180deg); }}
-  img, svg, picture, video, canvas {{ filter: invert(1) hue-rotate(180deg); }}
+  /* Strip every explicit background inside the email so content blends into
+     our dark canvas — visually more unified than an inverted "card". Images,
+     SVG, video, and canvas keep their own rendering so brand imagery stays
+     correct. Text colors get forced to a readable light value because many
+     newsletters hard-code dark text (e.g. color:#212121) that would vanish
+     on a dark background if we only stripped the bg. Links keep a
+     distinguishable blue. */
+  html, body {{ background: #1a1a1a; color: #e5e5e5; }}
+  body *:not(img):not(svg):not(picture):not(video):not(canvas) {{
+    background-color: transparent !important;
+    background-image: none !important;
+  }}
+  body, body *:not(a):not(img):not(svg):not(picture):not(video):not(canvas) {{
+    color: #e5e5e5 !important;
+  }}
+  body a, body a * {{ color: #4da6ff !important; }}
 }}
 </style>
 </head>
