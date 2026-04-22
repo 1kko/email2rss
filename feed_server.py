@@ -230,7 +230,9 @@ def create_app() -> Flask:
             )
         except FileNotFoundError:
             entries = []
-        return render_template("list.html", entries=entries)
+        opml = next((e for e in entries if e.endswith(".opml")), None)
+        xml_entries = [e for e in entries if e.endswith(".xml")]
+        return render_template("list.html", entries=entries, opml=opml, xml_entries=xml_entries)
 
     @app.get("/img")
     def image_proxy_route():

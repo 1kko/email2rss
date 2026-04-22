@@ -89,6 +89,40 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 });
 
+// --- Nav auto-hide on scroll ---
+// Hide the sticky site-nav when the user scrolls down past the nav height;
+// reveal it again on any upward scroll. Matches the common mobile pattern
+// where the nav gets out of the way while reading and comes back when the
+// user wants to navigate.
+(() => {
+  const nav = document.querySelector('.site-nav');
+  if (!nav) return;
+  let lastY = window.scrollY;
+  let ticking = false;
+  const threshold = nav.offsetHeight + 30;
+
+  function onScroll() {
+    const y = window.scrollY;
+    // Always show near the top (so refreshed pages don't start hidden)
+    if (y < threshold) {
+      nav.classList.remove('site-nav--hidden');
+    } else if (y > lastY + 4) {
+      nav.classList.add('site-nav--hidden');
+    } else if (y < lastY - 4) {
+      nav.classList.remove('site-nav--hidden');
+    }
+    lastY = y;
+    ticking = false;
+  }
+
+  window.addEventListener('scroll', () => {
+    if (!ticking) {
+      requestAnimationFrame(onScroll);
+      ticking = true;
+    }
+  }, { passive: true });
+})();
+
 // --- Unread-dot optimistic update ---
 // When the user clicks a card, note its href in sessionStorage. On pageshow
 // (including bfcache restore, which hands back the stale landing DOM),
