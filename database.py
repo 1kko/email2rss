@@ -694,10 +694,19 @@ def _article_dict(row: Email, sign_url) -> dict:
     preview = row.preview_image_url
     image_url = sign_url(preview) if preview else None
 
+    # timestamp_iso: emit UTC ISO-8601 with a 'Z' suffix so the browser can
+    # parse with new Date() and do day-boundary comparisons in the user's
+    # local timezone. Server-side relative_date stays as a no-JS fallback.
+    if row.timestamp:
+        ts_iso = row.timestamp.replace(microsecond=0).isoformat() + "Z"
+    else:
+        ts_iso = ""
+
     return {
         "sender": row.sender,
         "subject": subject,
         "date_str": date_str,
+        "timestamp_iso": ts_iso,
         "relative_date": util.relative_date(row.timestamp) if row.timestamp else "",
         "guid": guid,
         "feed_name": _sanitize_feed_name(row.sender),

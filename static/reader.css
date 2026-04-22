@@ -661,6 +661,7 @@ h1 {
 }
 
 .article-card__date {
+  display: block;
   font-size: 0.75rem;
   color: var(--meta-color);
   margin: 0;
