@@ -264,8 +264,11 @@ a {{ color: #0066cc; }}
      newsletters hard-code dark text (e.g. color:#212121) that would vanish
      on a dark background if we only stripped the bg. Links keep a
      distinguishable blue. */
-  html, body {{ background: #1a1a1a; color: #e5e5e5; }}
-  body *:not(img):not(svg):not(picture):not(video):not(canvas) {{
+  html {{ background: #1a1a1a; }}
+  /* body AND its descendants get bg stripped — some newsletters set
+     `background-color` directly on <body>, so a descendant-only selector
+     would miss them. */
+  body, body *:not(img):not(svg):not(picture):not(video):not(canvas) {{
     background-color: transparent !important;
     background-image: none !important;
   }}

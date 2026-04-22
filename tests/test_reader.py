@@ -259,6 +259,10 @@ def test_render_iframe_document_strips_backgrounds_in_dark_mode():
     assert "background-image: none !important" in doc
     # Media elements are excluded from the background strip
     assert ":not(img):not(svg):not(picture):not(video):not(canvas)" in doc
+    # The bg-strip selector MUST include body itself — some newsletters set
+    # background-color directly on <body>, so a descendant-only selector
+    # (body *) would leave that inline light bg in place on our dark canvas.
+    assert "body, body *:not(img):not(svg):not(picture):not(video):not(canvas)" in doc
     # Text color is forced light
     assert "color: #e5e5e5 !important" in doc
     # Invert filter is NOT used anymore
