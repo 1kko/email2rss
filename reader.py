@@ -103,7 +103,12 @@ ALLOWED_TAGS = frozenset({
 ALLOWED_ATTRS = {
     "*": ["class", "id", "style", "title"],
     "a": ["href", "target", "rel"],
-    "img": ["alt", "src", "width", "height"],
+    # "loading" allowed so we can force eager-loading in ImageRewriter. Without
+    # it, browsers' auto lazy-load heuristic defers images below the fold;
+    # combined with our overflow:hidden iframe body those images never enter a
+    # viewport, so they never load and the iframe's scrollHeight never reaches
+    # its true value. Forcing loading=eager keeps the autosize deterministic.
+    "img": ["alt", "src", "width", "height", "loading"],
     "td": ["colspan", "rowspan"],
     "th": ["colspan", "rowspan"],
     "time": ["datetime"],
@@ -124,6 +129,7 @@ def _make_image_rewriter(cid_map: dict[str, str], sign_url: Callable[[str], str]
                     attrs = dict(token.get("data") or {})
                     src_key = (None, "src")
                     srcset_key = (None, "srcset")
+                    loading_key = (None, "loading")
                     src = attrs.get(src_key, "")
                     attrs.pop(srcset_key, None)
 
@@ -132,6 +138,8 @@ def _make_image_rewriter(cid_map: dict[str, str], sign_url: Callable[[str], str]
                         # Drop the tag entirely by skipping the token
                         continue
                     attrs[src_key] = new_src
+                    # Force eager loading — see ALLOWED_ATTRS comment for why.
+                    attrs[loading_key] = "eager"
                     token["data"] = attrs
                 yield token
 
