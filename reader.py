@@ -239,6 +239,12 @@ _IFRAME_TEMPLATE = """\
 <base target="_blank">
 <style>
 body {{ font: 16px/1.5 -apple-system, system-ui, sans-serif; color: #222; margin: 0 1rem; }}
+/* Center block-level email content. Newsletter templates commonly use
+   fixed-width tables (e.g. width:600px) laid out flush-left; `margin: 0 auto`
+   centers them within the iframe viewport. Content without a fixed width
+   still fills naturally because auto margins only collapse when a width
+   is declared. */
+body > * {{ margin-left: auto; margin-right: auto; }}
 img {{ max-width: 100%; height: auto; animation: fade-in 0.3s ease-out; }}
 @keyframes fade-in {{ from {{ opacity: 0; }} to {{ opacity: 1; }} }}
 a {{ color: #0066cc; }}

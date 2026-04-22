@@ -3,7 +3,7 @@
     --bg-color: #ffffff;
     --text-color: #333333;
     --meta-color: #666666;
-    --border-color: #e0e0e000;
+    --border-color: #e0e0e0;
     --link-color: #0066cc;
     --code-bg: #f5f5f5;
     --card-bg: #ffffff;
@@ -15,7 +15,7 @@
         --bg-color: #1a1a1a;
         --text-color: #e0e0e0;
         --meta-color: #a0a0a0;
-        --border-color: #33333300;
+        --border-color: #333;
         --link-color: #4da6ff;
         --code-bg: #2a2a2a;
         --card-bg: #1e1e1e;
@@ -165,10 +165,12 @@ h1 {
 
 .email-body-iframe {
   width: 100%;
-  /* Fill viewport below the site nav + article header. Falls back to 80vh
-     on browsers that don't support calc-with-vh (rare). */
-  height: calc(100vh - 180px);
-  min-height: 60vh;
+  /* Height is set dynamically by reader.js to the iframe content's scrollHeight
+     so the article reads as a single continuous page — no nested scrollbar.
+     We seed with a small initial value; JS kicks in on load and on every image
+     load event. Falls back gracefully if JS is disabled (page just scrolls
+     inside the iframe at a sensible size). */
+  height: 80vh;
   border: 0;
   display: block;
   background: transparent;
@@ -183,6 +185,11 @@ h1 {
   padding: 0.75rem 1rem;
   border-bottom: 1px solid #e0e0e0;
   background: #fafafa;
+  /* Sticky so the nav stays visible while the article scrolls, matching the
+     landing page behavior and the original Netflix-style mockup. */
+  position: sticky;
+  top: 0;
+  z-index: 10;
 }
 .site-nav__left {
   display: flex;

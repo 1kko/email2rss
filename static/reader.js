@@ -58,6 +58,70 @@ document.addEventListener('DOMContentLoaded', () => {
       window.location.href = '/article';
     });
   }
+
+  // Auto-size the email iframe to its content so the page reads as one
+  // continuous scroll (no nested scrollbar). Requires allow-same-origin in
+  // the iframe sandbox — safe because the inner CSP still forbids scripts,
+  // so the iframe can't run JS to exploit same-origin access.
+  const iframe = document.getElementById('email-body');
+  if (iframe) {
+    const resize = () => {
+      try {
+        const doc = iframe.contentDocument;
+        if (!doc) return;
+        const h = Math.max(
+          doc.documentElement.scrollHeight,
+          doc.body ? doc.body.scrollHeight : 0
+        );
+        if (h > 0) iframe.style.height = h + 'px';
+      } catch (_) { /* cross-origin or not loaded yet */ }
+    };
+    iframe.addEventListener('load', () => {
+      resize();
+      try {
+        const ro = new ResizeObserver(resize);
+        if (iframe.contentDocument?.body) ro.observe(iframe.contentDocument.body);
+      } catch (_) { /* ResizeObserver unsupported — fall back to image-load hook */ }
+      iframe.contentDocument?.querySelectorAll('img').forEach((img) => {
+        if (!img.complete) img.addEventListener('load', resize);
+      });
+    });
+  }
+});
+
+// --- Unread-dot optimistic update ---
+// When the user clicks a card, note its href in sessionStorage. On pageshow
+// (including bfcache restore, which hands back the stale landing DOM),
+// strip the unread dot from any card whose href matches a visited entry.
+// Dwell-timer on the article page still does the server-side mark_read; this
+// is purely a UI sync for the "browser back" path where the stale page would
+// otherwise still show the blue dot until a hard refresh.
+const VISITED_KEY = 'email2rss.visitedArticles';
+document.addEventListener('DOMContentLoaded', () => {
+  document.querySelectorAll('.article-card[href]').forEach((card) => {
+    card.addEventListener('click', () => {
+      try {
+        const visited = JSON.parse(sessionStorage.getItem(VISITED_KEY) || '[]');
+        if (!visited.includes(card.getAttribute('href'))) {
+          visited.push(card.getAttribute('href'));
+          sessionStorage.setItem(VISITED_KEY, JSON.stringify(visited));
+        }
+      } catch (_) { /* sessionStorage unavailable — dwell timer + refresh still works */ }
+    });
+  });
+});
+window.addEventListener('pageshow', () => {
+  try {
+    const visited = JSON.parse(sessionStorage.getItem(VISITED_KEY) || '[]');
+    if (!visited.length) return;
+    const hrefs = new Set(visited);
+    document.querySelectorAll('.article-card[href]').forEach((card) => {
+      if (hrefs.has(card.getAttribute('href'))) {
+        const dot = card.querySelector('.article-card__unread-dot');
+        if (dot) dot.remove();
+      }
+    });
+  } catch (_) { /* ignore — stale DOM still readable */ }
 });
 
 // --- Landing page scroller wiring (Netflix-style horizontal rows) ---

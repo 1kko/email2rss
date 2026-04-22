@@ -89,7 +89,9 @@ def test_article_route_renders_body_in_sandboxed_iframe(client, db_session, monk
     assert resp.status_code == 200
     html = resp.data.decode("utf-8")
     assert '<iframe' in html
-    assert 'sandbox="allow-popups allow-popups-to-escape-sandbox"' in html
+    # allow-same-origin enables parent JS to auto-size the iframe to its
+    # content; safe because the inner CSP blocks scripts from running.
+    assert 'sandbox="allow-popups allow-popups-to-escape-sandbox allow-same-origin"' in html
     assert 'srcdoc=' in html
     assert "Hello from the test suite" in html  # subject in header
 
