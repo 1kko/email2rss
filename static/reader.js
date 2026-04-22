@@ -89,6 +89,79 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 });
 
+// --- Client-side relative date (Korean) ---
+// Server renders a fallback based on its UTC clock; we recompute using the
+// browser's local time so day-boundary categories ("어제", "N일 전") match
+// the user's wall clock instead of UTC.
+function formatRelativeKo(dt, now) {
+  const deltaMs = now - dt;
+  const deltaSec = deltaMs / 1000;
+  if (deltaSec < 60) return '방금 전';
+  if (deltaSec < 3600) return `${Math.floor(deltaSec / 60)}분 전`;
+
+  // Calendar-day comparison uses local-time (y/m/d from getFullYear/Month/Date)
+  const sameLocalDay = dt.getFullYear() === now.getFullYear()
+    && dt.getMonth() === now.getMonth()
+    && dt.getDate() === now.getDate();
+  if (sameLocalDay) return `${Math.floor(deltaSec / 3600)}시간 전`;
+
+  const yesterday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
+  const isYesterday = dt.getFullYear() === yesterday.getFullYear()
+    && dt.getMonth() === yesterday.getMonth()
+    && dt.getDate() === yesterday.getDate();
+  if (isYesterday) return '어제';
+
+  const days = Math.floor(deltaSec / 86400);
+  if (days < 7) return `${days}일 전`;
+  if (days < 30) return `${Math.floor(days / 7)}주 전`;
+  if (days < 365) return `${Math.floor(days / 30)}개월 전`;
+  return `${Math.floor(days / 365)}년 전`;
+}
+document.addEventListener('DOMContentLoaded', () => {
+  const now = new Date();
+  document.querySelectorAll('time[data-rel][datetime]').forEach((el) => {
+    const iso = el.getAttribute('datetime');
+    if (!iso) return;
+    const dt = new Date(iso);
+    if (isNaN(dt.getTime())) return;
+    el.textContent = formatRelativeKo(dt, now);
+  });
+});
+
+// --- Nav auto-hide on scroll ---
+// Hide the sticky site-nav when the user scrolls down past the nav height;
+// reveal it again on any upward scroll. Matches the common mobile pattern
+// where the nav gets out of the way while reading and comes back when the
+// user wants to navigate.
+(() => {
+  const nav = document.querySelector('.site-nav');
+  if (!nav) return;
+  let lastY = window.scrollY;
+  let ticking = false;
+  const threshold = nav.offsetHeight + 30;
+
+  function onScroll() {
+    const y = window.scrollY;
+    // Always show near the top (so refreshed pages don't start hidden)
+    if (y < threshold) {
+      nav.classList.remove('site-nav--hidden');
+    } else if (y > lastY + 4) {
+      nav.classList.add('site-nav--hidden');
+    } else if (y < lastY - 4) {
+      nav.classList.remove('site-nav--hidden');
+    }
+    lastY = y;
+    ticking = false;
+  }
+
+  window.addEventListener('scroll', () => {
+    if (!ticking) {
+      requestAnimationFrame(onScroll);
+      ticking = true;
+    }
+  }, { passive: true });
+})();
+
 // --- Unread-dot optimistic update ---
 // When the user clicks a card, note its href in sessionStorage. On pageshow
 // (including bfcache restore, which hands back the stale landing DOM),

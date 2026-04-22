@@ -56,6 +56,133 @@ article {
     padding: 0.75rem 1rem;
 }
 
+/* ----------- Raw Feeds (/list) ----------- */
+.raw-feeds {
+    max-width: 1100px;
+    margin: 0 auto;
+    padding: 1.25rem 1rem 3rem;
+}
+.raw-feeds__intro h1 {
+    font-size: 1.5rem;
+    letter-spacing: -0.01em;
+    margin: 0 0 0.25rem;
+}
+.raw-feeds__desc {
+    color: var(--meta-color);
+    font-size: 0.9rem;
+    margin: 0 0 1.25rem;
+}
+.raw-feeds__desc a {
+    color: var(--link-color);
+    text-decoration: none;
+}
+.raw-feeds__desc a:hover { text-decoration: underline; }
+
+.opml-card {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    padding: 1rem 1.1rem;
+    margin-bottom: 2rem;
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    text-decoration: none;
+    color: inherit;
+    background: linear-gradient(135deg, rgba(0,102,204,0.06), rgba(245,166,35,0.04));
+    transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+}
+.opml-card:hover {
+    transform: translateY(-1px);
+    border-color: var(--link-color);
+    box-shadow: 0 4px 14px rgba(0,0,0,0.08);
+}
+.opml-card__icon {
+    font-size: 1.6rem;
+    line-height: 1;
+    flex: 0 0 auto;
+}
+.opml-card__body { flex: 1 1 auto; }
+.opml-card__title {
+    font-size: 1rem;
+    margin: 0;
+    font-family: "SF Mono", Menlo, monospace;
+}
+.opml-card__desc {
+    color: var(--meta-color);
+    font-size: 0.85rem;
+    margin: 0.15rem 0 0;
+}
+.opml-card__chevron {
+    color: var(--meta-color);
+    font-size: 1.2rem;
+    flex: 0 0 auto;
+    transition: transform 0.15s ease;
+}
+.opml-card:hover .opml-card__chevron { transform: translateX(3px); color: var(--link-color); }
+
+.raw-feeds__section-title {
+    font-size: 1rem;
+    font-weight: 600;
+    margin: 0 0 0.75rem;
+    color: var(--text-color);
+    display: flex;
+    align-items: baseline;
+    gap: 0.5rem;
+}
+.raw-feeds__count {
+    font-size: 0.8rem;
+    font-weight: 500;
+    color: var(--meta-color);
+    background: var(--code-bg);
+    padding: 0.1rem 0.5rem;
+    border-radius: 10px;
+}
+
+.feed-grid {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 0.5rem;
+}
+.feed-chip {
+    display: flex;
+    align-items: baseline;
+    gap: 0.4rem;
+    padding: 0.55rem 0.8rem;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    text-decoration: none;
+    color: var(--text-color);
+    background: var(--card-bg);
+    font-family: "SF Mono", Menlo, monospace;
+    font-size: 0.85rem;
+    transition: border-color 0.12s ease, background 0.12s ease, transform 0.12s ease;
+    overflow: hidden;
+}
+.feed-chip:hover {
+    border-color: var(--link-color);
+    background: rgba(0, 102, 204, 0.04);
+    transform: translateY(-1px);
+}
+.feed-chip__name {
+    flex: 1 1 auto;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.feed-chip__ext {
+    flex: 0 0 auto;
+    color: var(--meta-color);
+    font-size: 0.75rem;
+}
+.raw-feeds__empty {
+    color: var(--meta-color);
+    text-align: center;
+    padding: 3rem 1rem;
+}
+
 .back-link {
     display: inline-block;
     margin-bottom: 0.5rem;
@@ -194,11 +321,17 @@ h1 {
   padding: 0.75rem 1rem;
   border-bottom: 1px solid #e0e0e0;
   background: #fafafa;
-  /* Sticky so the nav stays visible while the article scrolls, matching the
-     landing page behavior and the original Netflix-style mockup. */
+  /* Sticky with auto-hide: JS toggles .site-nav--hidden on scroll direction,
+     and the transform transition slides the nav out of / back into view. */
   position: sticky;
   top: 0;
   z-index: 10;
+  transform: translateY(0);
+  transition: transform 0.25s ease;
+  will-change: transform;
+}
+.site-nav--hidden {
+  transform: translateY(-100%);
 }
 .site-nav__left {
   display: flex;
@@ -528,6 +661,7 @@ h1 {
 }
 
 .article-card__date {
+  display: block;
   font-size: 0.75rem;
   color: var(--meta-color);
   margin: 0;

@@ -1,15 +1,41 @@
 {% extends "base.html" %}
-{% block title %}email2rss — XML feed list{% endblock %}
+{% block title %}email2rss — Raw Feeds{% endblock %}
 {% block body %}
-<h1>RSS Feeds (XML)</h1>
-<p>Direct XML URLs for RSS readers. For the styled landing, <a href="/">go back to /</a>.</p>
-{% if entries %}
-<ul>
-  {% for name in entries %}
-    <li><a href="/{{ name }}">{{ name }}</a></li>
-  {% endfor %}
-</ul>
-{% else %}
-<p>No feeds yet. The IMAP fetcher will populate feeds once emails are fetched and RSS files are generated.</p>
-{% endif %}
+<main class="raw-feeds">
+  <header class="raw-feeds__intro">
+    <h1>Raw Feeds</h1>
+    <p class="raw-feeds__desc">
+      Direct XML URLs for RSS readers. For the styled landing, <a href="/">go back to /</a>.
+    </p>
+  </header>
+
+  {% if opml %}
+  <a href="/{{ opml }}" class="opml-card">
+    <span class="opml-card__icon" aria-hidden="true">📥</span>
+    <div class="opml-card__body">
+      <h2 class="opml-card__title">{{ opml }}</h2>
+      <p class="opml-card__desc">Import every feed at once — drop this URL into your RSS reader.</p>
+    </div>
+    <span class="opml-card__chevron" aria-hidden="true">→</span>
+  </a>
+  {% endif %}
+
+  {% if xml_entries %}
+  <section class="raw-feeds__section">
+    <h2 class="raw-feeds__section-title">Individual feeds <span class="raw-feeds__count">{{ xml_entries|length }}</span></h2>
+    <ul class="feed-grid">
+      {% for name in xml_entries %}
+        <li>
+          <a href="/{{ name }}" class="feed-chip">
+            <span class="feed-chip__name">{{ name[:-4] }}</span>
+            <span class="feed-chip__ext">.xml</span>
+          </a>
+        </li>
+      {% endfor %}
+    </ul>
+  </section>
+  {% elif not opml %}
+  <p class="raw-feeds__empty">No feeds yet. The IMAP fetcher will populate feeds once emails are fetched.</p>
+  {% endif %}
+</main>
 {% endblock %}

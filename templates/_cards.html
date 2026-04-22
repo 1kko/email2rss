@@ -37,7 +37,7 @@
         {{ article.sender.split("@")[1] if "@" in article.sender else article.sender }}
       </p>
       <h3 class="article-card__subject">{{ article.subject }}</h3>
-      <p class="article-card__date">{{ article.relative_date }}</p>
+      <time class="article-card__date" datetime="{{ article.timestamp_iso }}" data-rel>{{ article.relative_date }}</time>
       {% if not article.is_read %}<span class="article-card__unread-dot" aria-label="unread"></span>{% endif %}
     </div>
   </a>
@@ -48,7 +48,7 @@
     <div class="article-card__thumb">{{ _thumb(article) }}</div>
     <div class="article-card__body">
       <h3 class="article-card__subject">{{ article.subject }}</h3>
-      <p class="article-card__date">{{ article.relative_date }}</p>
+      <time class="article-card__date" datetime="{{ article.timestamp_iso }}" data-rel>{{ article.relative_date }}</time>
       {% if not article.is_read %}<span class="article-card__unread-dot" aria-label="unread"></span>{% endif %}
     </div>
   </a>
