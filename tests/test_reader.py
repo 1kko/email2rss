@@ -245,17 +245,24 @@ def test_render_iframe_document_includes_csp_and_body():
     assert "<p>hi</p>" in doc
 
 
-def test_render_iframe_document_forces_dark_mode_via_filter():
+def test_render_iframe_document_strips_backgrounds_in_dark_mode():
     """
-    In dark mode we invert the html filter so inline email styles (bgcolor=#fff,
-    color:#000) flip to dark. Images/SVG/video get a canceling inverse filter
-    so photos and logos render with their true colors.
+    In dark mode we strip every explicit background so email content blends
+    into our dark canvas (more aesthetically unified than an inverted card).
+    Images/SVG/video/canvas are excluded from the strip so brand imagery
+    stays correct. Text is forced to a light color so inline dark colors
+    (common stibee pattern: color:#212121) don't vanish.
     """
     doc = reader.render_iframe_document("<p>hi</p>", proxy_origin="http://localhost:8000")
     assert "@media (prefers-color-scheme: dark)" in doc
-    assert "filter: invert(1) hue-rotate(180deg)" in doc
-    # Verify media elements get their own filter rule for cancellation
-    assert "img, svg, picture, video, canvas" in doc
+    assert "background-color: transparent !important" in doc
+    assert "background-image: none !important" in doc
+    # Media elements are excluded from the background strip
+    assert ":not(img):not(svg):not(picture):not(video):not(canvas)" in doc
+    # Text color is forced light
+    assert "color: #e5e5e5 !important" in doc
+    # Invert filter is NOT used anymore
+    assert "filter: invert" not in doc
 
 
 def _make_html_msg(html_body: str, sender="s@example.com"):

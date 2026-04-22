@@ -11,12 +11,20 @@
   <nav class="site-nav">
     <div class="site-nav__left">
       <a href="/" class="nav-home" aria-label="email2rss home">email2rss</a>
-      <a href="/article" class="nav-link">All Articles</a>
+      <a href="/" class="nav-link">All Articles</a>
       <a href="/list" class="nav-link">Raw Feeds</a>
     </div>
-    <form class="nav-search" action="/search" method="get">
-      <input type="search" name="q" placeholder="Search..." value="{{ search_q or '' }}" required>
-    </form>
+    <div class="site-nav__right">
+      <a href="{% if starred_only %}/{% else %}/?starred=1{% endif %}"
+         class="nav-link nav-starred{% if starred_only %} nav-starred--active{% endif %}"
+         aria-label="{% if starred_only %}Show all articles{% else %}Show starred only{% endif %}"
+         title="{% if starred_only %}Show all articles{% else %}Show starred only{% endif %}">
+        {% if starred_only %}★ Starred{% else %}☆ Starred{% endif %}
+      </a>
+      <form class="nav-search" action="/search" method="get">
+        <input type="search" name="q" placeholder="Search..." value="{{ search_q or '' }}" required>
+      </form>
+    </div>
   </nav>
   {% block body %}{% endblock %}
 </body>

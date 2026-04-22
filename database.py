@@ -710,8 +710,15 @@ def _article_dict(row: Email, sign_url) -> dict:
     }
 
 
-def get_landing_data(latest_limit: int = 10, per_sender_limit: int = 10) -> dict:
-    """Return the landing-page payload. See spec for shape details."""
+def get_landing_data(
+    latest_limit: int = 10, per_sender_limit: int = 10, starred_only: bool = False
+) -> dict:
+    """
+    Return the landing-page payload.
+
+    When `starred_only` is True, both the Latest strip and per-sender rows
+    include only rows where is_starred=True. Empty rows are omitted.
+    """
     from common import get_img_proxy_secret, config
     import img_proxy
 
@@ -725,33 +732,33 @@ def get_landing_data(latest_limit: int = 10, per_sender_limit: int = 10) -> dict
 
     with Session() as session:
         # Latest across all senders
-        latest_rows = (
-            session.query(Email)
-            .order_by(Email.timestamp.desc())
-            .limit(latest_limit)
-            .all()
-        )
+        latest_q = session.query(Email)
+        if starred_only:
+            latest_q = latest_q.filter(Email.is_starred == True)  # noqa: E712
+        latest_rows = latest_q.order_by(Email.timestamp.desc()).limit(latest_limit).all()
         latest = [_article_dict(r, sign) for r in latest_rows]
 
         # Per-sender: get each sender's most recent timestamp (for row ordering)
         from sqlalchemy import func
-        sender_tops = (
-            session.query(Email.sender, func.max(Email.timestamp).label("t_max"),
-                          func.count(Email.id).label("article_count"))
-            .group_by(Email.sender)
-            .order_by(func.max(Email.timestamp).desc())
-            .all()
+        sender_tops_q = session.query(
+            Email.sender,
+            func.max(Email.timestamp).label("t_max"),
+            func.count(Email.id).label("article_count"),
         )
+        if starred_only:
+            sender_tops_q = sender_tops_q.filter(Email.is_starred == True)  # noqa: E712
+        sender_tops = sender_tops_q.group_by(Email.sender).order_by(
+            func.max(Email.timestamp).desc()
+        ).all()
 
         rows = []
         for sender, _t_max, article_count in sender_tops:
-            sender_articles = (
-                session.query(Email)
-                .filter_by(sender=sender)
-                .order_by(Email.timestamp.desc())
-                .limit(per_sender_limit)
-                .all()
-            )
+            articles_q = session.query(Email).filter_by(sender=sender)
+            if starred_only:
+                articles_q = articles_q.filter(Email.is_starred == True)  # noqa: E712
+            sender_articles = articles_q.order_by(Email.timestamp.desc()).limit(
+                per_sender_limit
+            ).all()
             if not sender_articles:
                 continue
             dicts = [_article_dict(r, sign) for r in sender_articles]

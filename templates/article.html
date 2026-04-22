@@ -8,6 +8,7 @@
          data-is-read="{{ 'true' if is_read else 'false' }}"
          data-is-starred="{{ 'true' if is_starred else 'false' }}">
   <header>
+    <a href="/" class="back-link" aria-label="Back to landing">← Back</a>
     <h1>{{ subject }}</h1>
     <p class="meta">From: {{ sender }} | Date: {{ date }}</p>
     <div class="article-actions">
