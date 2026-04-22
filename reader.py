@@ -243,14 +243,16 @@ img {{ max-width: 100%; height: auto; animation: fade-in 0.3s ease-out; }}
 @keyframes fade-in {{ from {{ opacity: 0; }} to {{ opacity: 1; }} }}
 a {{ color: #0066cc; }}
 @media (prefers-color-scheme: dark) {{
-  /* Inline styles inside newsletter HTML (bgcolor="#fff", color:#000, etc.)
-     win over our CSS via specificity, so the @media rule on body was only
-     re-skinning the margin strip. Apply an invert+hue-rotate filter to the
-     whole document so every painted color flips to its dark-mode equivalent.
-     Images/SVG/video get an inverse filter that cancels the outer one so
-     they render with their original colors — photos, logos, charts stay
-     correct. */
-  html {{ background: #1a1a1a; filter: invert(1) hue-rotate(180deg); }}
+  /* Invert+hue-rotate so inline email styles (color:#000, transparent bg +
+     dark text, etc.) flip to their dark-mode counterparts. Our own
+     declarations must be "pre-inverted": html painted as #e5e5e5 renders
+     as #1a1a1a to the viewer after the filter runs. Setting html to
+     #1a1a1a directly would leave the viewer seeing #e5e5e5 — a light
+     surface where dark inline text (#212121 → #dedede) sits, making the
+     content invisible.
+     Images/SVG/video/canvas get a canceling inverse filter so photos,
+     logos, and charts render with their original colors. */
+  html {{ background: #e5e5e5; filter: invert(1) hue-rotate(180deg); }}
   img, svg, picture, video, canvas {{ filter: invert(1) hue-rotate(180deg); }}
 }}
 </style>
