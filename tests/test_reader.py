@@ -118,6 +118,23 @@ def test_clean_rewrites_http_img():
     assert 'src="SIGN:http://cdn.example.com/x.png"' in out
 
 
+def test_clean_forces_eager_loading_on_images():
+    """
+    iframe body uses overflow:hidden so below-fold images never enter their
+    own viewport → browsers' auto lazy-load keeps them unresolved → iframe's
+    scrollHeight never reaches its true value and autosize stalls. Every
+    <img> must come out with loading="eager".
+    """
+    out = reader.clean_and_rewrite(
+        '<img src="http://x.com/a.png"><img src="http://x.com/b.png" loading="lazy">',
+        {},
+        _identity_sign,
+    )
+    # Both images get loading=eager, overriding any inline lazy attr
+    assert out.count('loading="eager"') == 2
+    assert 'loading="lazy"' not in out
+
+
 def test_clean_rewrites_https_img():
     out = reader.clean_and_rewrite('<img src="https://cdn.example.com/x.png">', {}, _identity_sign)
     assert 'src="SIGN:https://cdn.example.com/x.png"' in out
