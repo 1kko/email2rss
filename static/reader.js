@@ -61,18 +61,18 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Auto-size the email iframe to its content so the page reads as one
   // continuous scroll (no nested scrollbar). Requires allow-same-origin in
-  // the iframe sandbox — safe because the inner CSP still forbids scripts,
-  // so the iframe can't run JS to exploit same-origin access.
+  // the iframe sandbox — safe because the inner CSP still forbids scripts.
   //
-  // We start observing BEFORE the iframe's `load` event — load waits for
-  // every subresource (images), which means long emails showed partial
-  // content at 80vh with inner scroll until load finally fired. Polling
-  // via requestAnimationFrame until body exists catches the iframe right
-  // after srcdoc is parsed, so the first paint already has the right
-  // height. ResizeObserver + image-load hooks handle later layout shifts.
+  // Observed in the wild: a single ResizeObserver on body is unreliable
+  // across Chrome cache states / streaming srcdoc parse. Some pages stuck
+  // at 80vh (720px) with body.scrollHeight=7342 because the observer never
+  // fired. Defense-in-depth: MutationObserver on body childList, image
+  // load hooks, window/document load events, plus delayed post-load
+  // re-measures. Whichever fires first grows the iframe; duplicates are
+  // cheap (resize writes an idempotent style).
   const iframe = document.getElementById('email-body');
   if (iframe) {
-    let observerAttached = false;
+    let attached = false;
     const resize = () => {
       try {
         const doc = iframe.contentDocument;
@@ -81,34 +81,54 @@ document.addEventListener('DOMContentLoaded', () => {
           doc.documentElement.scrollHeight,
           doc.body ? doc.body.scrollHeight : 0
         );
-        if (h > 0) iframe.style.height = h + 'px';
+        if (h > 0 && String(iframe.style.height) !== h + 'px') {
+          iframe.style.height = h + 'px';
+        }
       } catch (_) { /* cross-origin or not loaded yet */ }
     };
-    const attachObservers = () => {
-      if (observerAttached) return;
+    const attach = () => {
+      if (attached) return;
       try {
-        const body = iframe.contentDocument && iframe.contentDocument.body;
+        const doc = iframe.contentDocument;
+        const body = doc && doc.body;
         if (!body) return;
-        observerAttached = true;
+        attached = true;
         resize();
+        // ResizeObserver is the cheap path when it works
         try {
           const ro = new ResizeObserver(resize);
           ro.observe(body);
-        } catch (_) { /* ResizeObserver unsupported — image-load hook below still runs */ }
-        iframe.contentDocument.querySelectorAll('img').forEach((img) => {
+          ro.observe(doc.documentElement);
+        } catch (_) { /* unsupported — other hooks handle it */ }
+        // MutationObserver catches DOM mutations the RO may miss
+        try {
+          new MutationObserver(resize).observe(body, {
+            childList: true, subtree: true, attributes: true, characterData: true,
+          });
+        } catch (_) {}
+        // Image load hook — images that arrive after observer attach
+        doc.querySelectorAll('img').forEach((img) => {
           if (!img.complete) img.addEventListener('load', resize);
+          img.addEventListener('error', resize);
         });
-      } catch (_) { /* body not yet ready */ }
+      } catch (_) {}
     };
     // Fast path: poll via rAF until body exists, usually within 1 frame of
     // srcdoc parse — runs well before the iframe's `load` event.
     const tryNow = () => {
-      attachObservers();
-      if (!observerAttached) requestAnimationFrame(tryNow);
+      attach();
+      if (!attached) requestAnimationFrame(tryNow);
     };
     tryNow();
-    // Safety net: also handle the load event in case rAF polling missed.
-    iframe.addEventListener('load', attachObservers);
+    // Belt-and-suspenders: multiple trigger points for re-measurement.
+    iframe.addEventListener('load', () => {
+      attach();
+      // Delayed resizes catch post-load settling (font metrics, late
+      // decode-on-paint, browsers that fire load before final layout).
+      [50, 250, 1000, 3000].forEach((ms) => setTimeout(resize, ms));
+    });
+    window.addEventListener('load', resize);
+    document.addEventListener('readystatechange', resize);
   }
 });
 
