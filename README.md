@@ -2,6 +2,8 @@
 
 This project fetches emails from a specified mailbox and generates an RSS feed for each sender.
 
+![email2rss landing page — Netflix-style rows of article cards per sender](docs/images/landing.png)
+
 ## Features
 
 - Connects to an Email account using IMAP
