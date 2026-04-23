@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "email2rss"
-version = "0.2.1"
+version = "0.3.0"
 description = ""
 authors = ["Your Name <you@example.com>"]
 readme = "README.md"
@@ -9,7 +9,7 @@ package-mode = false
 
 [project]
 name = "email2rss"
-version = "0.2.1"
+version = "0.3.0"
 description = "Add your description here"
 dependencies = [
     "feedgen>=1.0.0",
